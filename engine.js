@@ -136,6 +136,8 @@ class Engine extends EventEmitter {
     if (bm.design === undefined) bm.design = bm.code;
     if (bm.chat === undefined) bm.chat = null;
     if (!BOTS.includes(this.config.activeBot)) this.config.activeBot = legacy ? 'code' : 'chat';
+    // Ab 1.10: Bots teilen sich das vorhandene Modell. Ein eigenes Modell lädt FORGE nur, wenn du es selbst auswählst.
+    this.config.botExplicit = this.config.botExplicit || {};
     this.state = { status: 'idle', message: '', error: null, hardware: null, active: null, download: null, loadProgress: 0 };
     this.lib = null;
     this.llama = null;
@@ -206,16 +208,37 @@ class Engine extends EventEmitter {
     return ids[level];
   }
 
-  // Modell-ID, die ein Bot benutzt (oder 'custom')
+  // Modell-ID, die ein Bot benutzt (oder 'custom').
+  // Regel: Nie extra herunterladen, wenn schon irgendein Modell da ist – außer der Nutzer hat es ausdrücklich gewählt.
   modelIdForBot(bot) {
     const id = this.config.botModels[bot];
-    if (id === 'custom' && this.config.customPath && fs.existsSync(this.config.customPath)) return 'custom';
-    if (id && CATALOG.some((c) => c.id === id)) return id;
-    // Noch nichts gewählt: ein passendes, schon vorhandenes Modell oder die Empfehlung
+    const customOk = () => this.config.customPath && fs.existsSync(this.config.customPath);
+    if (id === 'custom' && customOk()) return 'custom';
+    const entry = id && CATALOG.find((c) => c.id === id);
+    if (entry && (this.isInstalled(entry) || this.config.botExplicit[bot])) return id;
     const kind = BOT_KIND[bot];
+    const installed = CATALOG.filter((c) => this.isInstalled(c) && !/^test/.test(c.id) === !process.env.FORGE_TEST_MODEL);
     const rec = this.recommendedId(kind);
-    const have = CATALOG.find((c) => c.id === rec && this.isInstalled(c)) || CATALOG.find((c) => c.kind === kind && this.isInstalled(c));
-    return have ? have.id : rec;
+    // 1) passendes Modell schon da  2) gerade geladenes Modell  3) irgendein vorhandenes (größtes zuerst)
+    const sameKind = installed.filter((c) => c.kind === kind).sort((a, b) => b.size - a.size);
+    const pick =
+      installed.find((c) => c.id === rec) ||
+      sameKind.find((c) => c.size / GB < this.fitLimitGB()) ||
+      installed.find((c) => this.loadedPath && this.modelPath(c) === this.loadedPath) ||
+      sameKind[0] ||
+      installed.filter((c) => c.size / GB < this.fitLimitGB()).sort((a, b) => b.size - a.size)[0] ||
+      installed.sort((a, b) => a.size - b.size)[0];
+    if (pick) return pick.id;
+    if (customOk()) return 'custom';
+    // Noch gar nichts da (erster Start): EIN Modell für alles – der Coder kann auch chatten und 3D
+    return process.env.FORGE_TEST_MODEL ? rec : this.recommendedId('code');
+  }
+
+  // Grobe Grenze, ab der ein Modell auf diesem PC zu langsam wird (VRAM + etwas RAM)
+  fitLimitGB() {
+    const hw = this.state.hardware || {};
+    const vram = hw.gpu ? hw.vramGB || 0 : 0;
+    return Math.max(2.5, vram * 1.5 + 1);
   }
 
   publicState() {
@@ -299,10 +322,6 @@ class Engine extends EventEmitter {
       if (run !== this.runId) return;
       const activeBot = this.config.activeBot;
       const id = this.modelIdForBot(activeBot);
-      if (!this.config.botModels[activeBot]) {
-        this.config.botModels[activeBot] = id;
-        this.saveConfig();
-      }
       // Anderes Modell als das geladene → Wartende sollen auf das neue warten
       const target = id === 'custom' ? this.config.customPath : this.modelPath(CATALOG.find((c) => c.id === id));
       if (target !== this.loadedPath && this._readyDone) this._newReady();
@@ -354,6 +373,7 @@ class Engine extends EventEmitter {
   async setBotModel(bot, id) {
     if (!BOTS.includes(bot)) return false;
     this.config.botModels[bot] = id;
+    this.config.botExplicit[bot] = true; // selbst gewählt → darf auch heruntergeladen werden
     this.saveConfig();
     if (bot === this.config.activeBot || this.state.status === 'idle' || this.state.status === 'error') {
       this.cancelDownload();
@@ -372,6 +392,7 @@ class Engine extends EventEmitter {
     this.config.customPath = p;
     const bot = BOTS.includes(forBot) ? forBot : this.config.activeBot;
     this.config.botModels[bot] = 'custom';
+    this.config.botExplicit[bot] = true;
     this.saveConfig();
     this.start(bot);
   }
@@ -395,7 +416,13 @@ class Engine extends EventEmitter {
   }
 
   cancelDownload() {
-    if (this.downloadAbort) this.downloadAbort.abort();
+    if (this.downloadAbort) {
+      // Abgebrochen → nicht beim nächsten Mal wieder anfangen, stattdessen vorhandenes Modell nutzen
+      const id = this.state.download && this.state.download.id;
+      for (const b of BOTS) if (id && this.config.botModels[b] === id) this.config.botExplicit[b] = false;
+      this.saveConfig();
+      this.downloadAbort.abort();
+    }
   }
 
   // ---------- Download mit Fortsetzen ----------
@@ -767,6 +794,15 @@ Nicht suchen bei: normalem Programmieren, Erklären von Grundlagen, Plaudern, Re
       if (signal.aborted) return { aborted: true };
     }
     if (signal.aborted) return { aborted: true };
+    // Nur für automatische Tests: feste Antwort auf Reparatur-Anfragen
+    if (process.env.FORGE_TEST_REPLY_FILE && /^[🔧🔁]/u.test(String(messages[messages.length - 1].content || ''))) {
+      const reply = fs.readFileSync(process.env.FORGE_TEST_REPLY_FILE, 'utf8');
+      for (let i = 0; i < reply.length; i += 12) {
+        onText(reply.slice(i, i + 12));
+        await new Promise((r) => setTimeout(r, 5));
+      }
+      return { aborted: false, tps: 0, tokens: 0 };
+    }
     const toItem = (m) =>
       m.role === 'system' ? { type: 'system', text: m.content } : m.role === 'user' ? { type: 'user', text: m.content } : { type: 'model', response: [m.content || ''] };
     let last = messages[messages.length - 1];

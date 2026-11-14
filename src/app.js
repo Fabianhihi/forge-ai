@@ -371,6 +371,12 @@ function renderConversation() {
 function userEl(m) {
   const d = document.createElement('div');
   d.className = 'msg user';
+  if (m.auto) {
+    d.classList.add('auto');
+    const err = m.content.replace(/^[\s\S]*?```\n?/, '').replace(/```[\s\S]*$/, '').trim();
+    d.innerHTML = `<div><div class="bubble"><b>🔧 Automatische Reparatur${m.attempt ? ` (Versuch ${m.attempt}/${MAX_REPAIR})` : ''}</b><span>Beim Ausführen kam ein Fehler – die KI behebt ihn selbst.</span><details><summary>Fehlermeldung</summary><pre>${esc(err.slice(-1500))}</pre></details></div></div>`;
+    return d;
+  }
   const files = (m.files || []).map((f) => `<span class="file-pill">${esc(f.name)}</span>`).join('');
   d.innerHTML = `<div><div class="bubble">${esc(m.content) || '<span class="muted">(nur Dateien)</span>'}</div>${files ? `<div class="files">${files}</div>` : ''}</div>`;
   return d;
@@ -430,7 +436,7 @@ function webText(t) {
 function waitingText(m) {
   const st = S.engine || {};
   const b = BOTS[m.bot] || BOTS.chat;
-  if (st.status === 'downloading' && st.download) return `Der ${b.name} braucht sein eigenes Modell – lade ${st.download.title} (${st.download.params}) herunter … ${dlPct(st.download)} % (nur einmal nötig)`;
+  if (st.status === 'downloading' && st.download) return `Lade das KI-Modell ${st.download.title} (${st.download.params}) … ${dlPct(st.download)} % (nur einmal nötig)`;
   if (st.status === 'loading') return `Wechsle zum ${b.name}-Modell … ${st.loadProgress || 0} %`;
   if (m.switching) return `Wechsle zum ${b.name} …`;
   return "Deine KI startet noch … gleich geht's los.";
@@ -489,13 +495,16 @@ function stopStream() {
   if (S.streamId) forge.abort(S.streamId);
 }
 
-async function sendMessage(regenerate = false) {
-  if (S.busy) return;
+async function sendMessage(regenerate = false, preset = null) {
+  if (S.busy) return null;
   const input = $('#input');
-  const text = input.value.trim();
+  const text = preset ? preset.text : input.value.trim();
   let conv = currentConv();
-  if (!regenerate) {
-    if (!text && !S.attachments.length) return;
+  if (preset) {
+    if (!conv) return null;
+    conv.messages.push(preset.auto ? { role: 'user', content: text, auto: true, attempt: preset.attempt || 0 } : { role: 'user', content: text });
+  } else if (!regenerate) {
+    if (!text && !S.attachments.length) return null;
     if (!conv) conv = newConv();
     const um = { role: 'user', content: text, files: S.attachments.map((a) => ({ name: a.name, content: a.content })) };
     conv.messages.push(um);
@@ -505,9 +514,9 @@ async function sendMessage(regenerate = false) {
     renderAttachments();
     autosize();
   } else {
-    if (!conv) return;
+    if (!conv) return null;
     while (conv.messages.length && conv.messages[conv.messages.length - 1].role === 'assistant') conv.messages.pop();
-    if (!conv.messages.length) return;
+    if (!conv.messages.length) return null;
   }
   conv.updated = Date.now();
   S.convs = [conv, ...S.convs.filter((c) => c.id !== conv.id)];
@@ -573,6 +582,7 @@ async function sendMessage(regenerate = false) {
     saveConvs();
     if (nearBottom()) scrollBottom(true);
   }
+  return { conv, ai, el };
 }
 
 // Klicks in Nachrichten (Kopieren, Speichern, Vorschau …)
@@ -762,7 +772,7 @@ function runKind(lang, text, file) {
   return k;
 }
 
-const RUN = { id: null, mode: null, spec: null, url: null, errs: 0, runtimes: null };
+const RUN = { id: null, mode: null, spec: null, url: null, errs: 0, runtimes: null, errText: '', origin: null };
 
 function rpShow(mode, lang, title) {
   RUN.mode = mode;
@@ -799,6 +809,8 @@ function rpWrite(stream, text) {
   if (!text) return;
   rpPending.push([stream, text]);
   if (stream === 'stderr' || stream === 'error') {
+    RUN.errText = (RUN.errText + text + (stream === 'error' ? '\n' : '')).slice(-6000);
+    if (RUN.mode === 'web') scheduleWebFailure();
     RUN.errs++;
     $('#rpErrs').textContent = `${RUN.errs} Fehler`;
     if (RUN.mode === 'web') $('#runPanel').classList.add('con-open');
@@ -832,7 +844,10 @@ function filesFromMessage(cb) {
   return files;
 }
 
-function runFromBlock(cb) {
+function runFromBlock(cb, attempt = 0) {
+  const conv0 = currentConv();
+  RUN.origin = conv0 ? { convId: conv0.id, attempt, file: cb.dataset.file || '', lang: cb.dataset.lang || '' } : null;
+  RUN.pipTried = new Set();
   const code = $('code', cb).textContent;
   const lang = cb.dataset.lang;
   const file = cb.dataset.file ? cb.dataset.file.split(/[\\/]/).pop() : '';
@@ -866,6 +881,7 @@ function runFromBlock(cb) {
 
 async function runWeb(spec, title, lang = 'web') {
   stopRun();
+  resetRunErrors();
   RUN.spec = { kind: 'web', spec, title, lang };
   const { url } = await forge.run.preview(spec);
   RUN.url = url;
@@ -898,14 +914,15 @@ function confirmBox(title, html, ok = 'OK', withRemember = false) {
   });
 }
 
-async function runProgram(spec, title) {
+async function runProgram(spec, title, rerun = false) {
   const rts = await getRuntimes();
   const rt = rts[spec.lang];
   stopRun();
+  resetRunErrors();
   RUN.spec = { kind: 'proc', spec, title };
   rpShow('proc', spec.lang, title);
   if (!rt || !rt.available) return showMissing(spec.lang, rt);
-  if (!S.settings.runTrusted) {
+  if (!S.settings.runTrusted && !rerun && !(RUN.origin && RUN.origin.attempt)) {
     const r = await confirmBox(
       'Programm ausführen?',
       `<p>Dieser ${esc(LANG_NAME[spec.lang])}-Code läuft direkt auf deinem PC – wie jedes andere Programm. Führe nur Code aus, dem du vertraust. Spiele und Webseiten (HTML) laufen dagegen abgeschottet in der Vorschau.</p>`,
@@ -944,12 +961,18 @@ function showMissing(lang, rt) {
       ${rt && rt.winget ? `<button class="btn primary" data-m="install">${esc(name)} installieren</button>` : rt && rt.url ? `<button class="btn primary" data-m="install">Download-Seite öffnen</button>` : ''}
       <button class="btn" data-m="recheck">Nochmal prüfen</button>
     </div>
-    <p class="muted small">Tipp: Spiele als HTML-Datei laufen immer sofort – frag den Coder einfach nach einer HTML-Version.</p></div>`;
+    ${RUN.origin && lang !== 'python' ? `<div class="actions" style="justify-content:center;margin-top:10px"><button class="btn primary" data-m="rewrite">🔁 Ohne Installation: von der KI in Python/HTML umschreiben lassen</button></div>` : ''}
+    <p class="muted small">Tipp: HTML, JavaScript und Python laufen in FORGE immer sofort – ohne Installation.</p></div>`;
   rpStatus('fehlt', 'err');
   $('#rpMsg').onclick = async (e) => {
     const b = e.target.closest('[data-m]');
     if (!b) return;
-    if (b.dataset.m === 'install') {
+    if (b.dataset.m === 'rewrite') {
+      if (S.busy) return toast('Die KI schreibt gerade noch – versuch es gleich nochmal.', 'err');
+      const o = RUN.origin;
+      const res = await sendMessage(false, { text: `🔁 ${name} ist auf meinem PC nicht installiert. Schreib das Programm bitte so um, dass es in FORGE ohne Installation läuft – als Python-Programm oder, wenn es eine Oberfläche/ein Spiel ist, als eine HTML-Datei. Gib den kompletten Code aus.` });
+      runAnswer(res, { ...o, file: '', lang: '' }, 0);
+    } else if (b.dataset.m === 'install') {
       await forge.run.install(lang);
       toast('Installation gestartet – danach auf „Nochmal prüfen“ klicken', 'ok');
     } else {
@@ -976,42 +999,127 @@ function stopRun() {
 
 forge.run.onEvent((id, type, data) => {
   if (id !== RUN.id) return;
-  if (type === 'out') {
+  if (type === 'prep') {
+    if (data.phase === 'download') rpStatus(`Python wird eingerichtet … ${data.pct || 0} %`, 'run');
+    else if (data.phase === 'extract') rpStatus('Python wird entpackt …', 'run');
+    else if (data.phase === 'ready') rpStatus('läuft …', 'run');
+  } else if (type === 'out') {
     rpWrite(data.stream, data.text);
-    // Fehlendes Python-Paket? Anbieten, es zu installieren
+    // Fehlendes Python-Paket? Automatisch installieren und neu starten (einmal pro Paket)
     const m = data.stream === 'stderr' && /No module named '([\w.]+)'/.exec(data.text);
-    if (m && RUN.spec && RUN.spec.spec && RUN.spec.spec.lang === 'python') offerPip(m[1].split('.')[0]);
+    if (m && RUN.spec && RUN.spec.spec && RUN.spec.spec.lang === 'python') autoPip(m[1].split('.')[0]);
   } else if (type === 'exit') {
     RUN.id = null;
     $('#rpInput').disabled = true;
     if (data.pip) {
       if (data.code === 0) {
         rpWrite('info', `\n✓ ${data.pip} installiert – starte das Programm neu …\n`);
-        setTimeout(() => runProgram(RUN.spec.spec, RUN.spec.title), 600);
-      } else rpWrite('stderr', `\nInstallation von ${data.pip} fehlgeschlagen.\n`);
+        setTimeout(() => runProgram(RUN.spec.spec, RUN.spec.title, true), 600);
+      } else {
+        rpWrite('stderr', `\nInstallation von ${data.pip} fehlgeschlagen.\n`);
+        runFailed();
+      }
       return;
     }
+    if (RUN.pipPending) return; // gleich kommt die automatische Installation
     const ok = data.code === 0;
-    rpStatus(data.compileFailed ? 'Kompilieren fehlgeschlagen' : ok ? 'fertig' : `beendet (Code ${data.code ?? data.signal})`, ok ? 'ok' : 'err');
+    rpStatus(data.compileFailed ? 'Kompilieren fehlgeschlagen' : ok ? 'fertig' : RUN.userStop ? 'gestoppt' : `beendet (Code ${data.code ?? data.signal})`, ok ? 'ok' : 'err');
     rpWrite('info', `\n— Programm beendet${ok ? '' : ' mit Code ' + (data.code ?? data.signal)} —\n`);
+    if (ok) S.repairCount = 0;
+    else if (!RUN.userStop && (RUN.errText.trim() || data.compileFailed)) runFailed();
   }
 });
 
-function offerPip(module) {
-  if ($('#rpOut .pip-offer')) return;
-  const b = document.createElement('button');
-  b.className = 'btn sm primary pip-offer';
-  b.textContent = `📦 ${module} installieren und neu starten`;
-  b.onclick = async () => {
-    b.remove();
+function resetRunErrors() {
+  RUN.errText = '';
+  RUN.userStop = false;
+  RUN.failed = false;
+  RUN.pipPending = null;
+  clearTimeout(RUN.webFailT);
+}
+
+// Fehlendes Python-Modul automatisch nachinstallieren (ohne Nachfrage)
+function autoPip(module) {
+  RUN.pipTried = RUN.pipTried || new Set();
+  if (RUN.pipPending || RUN.pipTried.has(module) || ['tkinter', 'turtle', '_tkinter'].includes(module)) return;
+  RUN.pipTried.add(module);
+  RUN.pipPending = module;
+  const runId = RUN.id;
+  const go = async () => {
+    if (RUN.id === runId && runId) await forge.run.stop(runId);
     const id = uid();
     RUN.id = id;
-    rpStatus('installiere …', 'run');
+    RUN.errText = '';
+    rpStatus(`installiere ${module} …`, 'run');
     const r = await forge.run.pip(id, module);
-    if (!r.ok) rpWrite('stderr', r.error + '\n');
+    RUN.pipPending = null;
+    if (!r.ok) {
+      rpWrite('stderr', r.error + '\n');
+      runFailed();
+    }
   };
+  setTimeout(go, 150);
+}
+
+// Web-Vorschau: Fehler sammeln und kurz danach als „fehlgeschlagen“ werten
+function scheduleWebFailure() {
+  if (RUN.failed || RUN.webFailT) return;
+  RUN.webFailT = setTimeout(() => {
+    RUN.webFailT = null;
+    if (RUN.mode === 'web' && RUN.errText.trim()) runFailed();
+  }, 2500);
+}
+
+// ---------- Automatische Reparatur: Fehler zurück an die KI, korrigierten Code neu starten ----------
+const MAX_REPAIR = 2;
+function runFailed() {
+  if (RUN.failed) return;
+  RUN.failed = true;
+  const o = RUN.origin;
+  const conv = currentConv();
+  const canRepair = o && conv && conv.id === o.convId && botOf(conv) !== 'chat';
+  if (!canRepair) return;
+  const attempt = (o.attempt || 0) + 1;
+  if (S.settings.autoFix !== false && attempt <= MAX_REPAIR && !S.busy) {
+    rpWrite('info', `\n🔧 Die KI repariert den Fehler automatisch (Versuch ${attempt}/${MAX_REPAIR}) …\n`);
+    rpStatus('KI repariert …', 'run');
+    repairWithAi(attempt);
+  } else offerRepair(attempt);
+}
+
+function offerRepair(attempt) {
   rpFlush();
+  if ($('#rpOut .repair-offer')) return;
+  const b = document.createElement('button');
+  b.className = 'btn sm primary repair-offer';
+  b.textContent = '🔧 Fehler von der KI beheben lassen';
+  b.onclick = () => {
+    b.remove();
+    repairWithAi(Math.min(attempt, MAX_REPAIR));
+  };
   $('#rpOut').appendChild(b);
+  $('#rpOut').scrollTop = $('#rpOut').scrollHeight;
+}
+
+async function repairWithAi(attempt) {
+  if (S.busy) return toast('Die KI schreibt gerade noch – versuch es gleich nochmal.', 'err');
+  const o = RUN.origin || {};
+  const err = RUN.errText.trim().split('\n').slice(-40).join('\n').slice(-3000) || '(keine Fehlermeldung, Programm ist abgestürzt)';
+  const where = o.file ? ` von **${o.file}**` : '';
+  const text = `🔧 Beim Ausführen${where} kam dieser Fehler:\n\`\`\`\n${err}\n\`\`\`\nFinde die Ursache, behebe sie und gib den KOMPLETTEN korrigierten Code aus.`;
+  const res = await sendMessage(false, { text, attempt, auto: true });
+  runAnswer(res, o, attempt);
+}
+
+// Code aus einer KI-Antwort gleich starten (nach Reparatur oder Umschreiben)
+function runAnswer(res, o, attempt) {
+  if (!res || !res.ai || res.ai.error || res.ai.stopped) return;
+  const blocks = $$('.codeblock', res.el).filter((cb) => runKind(cb.dataset.lang, $('code', cb).textContent, cb.dataset.file ? cb.dataset.file.split(/[\\/]/).pop() : ''));
+  const same = blocks.find((cb) => o.file && cb.dataset.file === o.file) || blocks.find((cb) => o.lang && cb.dataset.lang === o.lang) || blocks[0];
+  if (same) {
+    toast(attempt ? `🔧 Korrigierter Code – starte neu (Versuch ${attempt}/${MAX_REPAIR})` : '▶ Starte den neuen Code …', 'ok');
+    runFromBlock(same, attempt);
+  }
 }
 
 // Meldungen aus der Vorschau (console.log, Fehler)
@@ -1044,6 +1152,7 @@ $('#rpRestart').addEventListener('click', () => {
   else runProgram(r.spec, r.title);
 });
 $('#rpStop').addEventListener('click', () => {
+  RUN.userStop = true;
   if (RUN.id) forge.run.stop(RUN.id);
 });
 $('#rpClose').addEventListener('click', () => {
@@ -1558,8 +1667,10 @@ function renderModels() {
       return `<button class="bot-tab ${b.id === tab ? 'active' : ''}" data-a="tab" data-id="${b.id}" style="--bot:${b.color}"><span class="bot-ic">${b.icon}</span><b>${esc(b.name)}</b><span>${esc(sub)}</span></button>`;
     })
     .join('');
+  // Passende Modelle + alles, was schon auf dem PC liegt (Bots dürfen sich Modelle teilen)
   const cards = st.catalog
-    .filter((c) => c.kind === kind)
+    .filter((c) => c.kind === kind || c.installed || c.id === current)
+    .sort((a, b) => (b.id === current) - (a.id === current) || b.installed - a.installed)
     .map((c) => {
       let actions;
       const isCurrent = c.id === current;
@@ -1575,7 +1686,7 @@ function renderModels() {
           c.active || c.usedBy.length ? '' : `<button class="btn sm ghost" data-a="del" data-id="${c.id}" title="Vom PC löschen">${I.trash}</button>`
         }</div>`;
       } else {
-        actions = `<button class="btn sm" data-a="use" data-id="${c.id}">${I.save} Herunterladen &amp; verwenden</button>`;
+        actions = `<button class="btn sm" data-a="use" data-id="${c.id}">${I.save} Optional: herunterladen &amp; verwenden</button>`;
       }
       const used = c.usedBy.filter((b) => b !== tab).map((b) => BOTS[b].name);
       return `<div class="mcard ${c.recommended ? 'rec' : ''} ${isCurrent ? 'act' : ''}">
@@ -1592,6 +1703,7 @@ function renderModels() {
     <p>${hw ? hwLine(hw) : ''}${st.freeDiskGB != null ? ` · ${String(Math.round(st.freeDiskGB))} GB frei` : ''}</p>
     <div class="bot-tabs">${tabs}</div>
     ${st.status === 'idle' && !st.active ? '<div class="notice">Wähle ein Modell, damit deine KI starten kann.</div>' : ''}
+    ${st.catalog.some((c) => c.installed) ? `<div class="notice small">✅ Alle Bots benutzen automatisch ein Modell, das schon auf deinem PC ist – es muss nichts extra heruntergeladen werden. Ein Spezial-Modell für den ${esc(BOTS[tab].name)} kannst du hier optional laden.</div>` : ''}
     ${current === 'custom' ? `<div class="notice">Der ${esc(BOTS[tab].name)} benutzt dein eigenes Modell <b>${esc(st.customName || '')}</b>.</div>` : ''}
     ${st.notice ? `<div class="notice">${esc(st.notice)}</div>` : ''}
     ${st.memNote ? `<div class="notice">${esc(st.memNote)}</div>` : ''}
@@ -1852,6 +1964,11 @@ function openSettings() {
         .join('')}</select><span class="hint">Mehr = längere Chats, braucht mehr Speicher</span></div>
     </div>
     <div class="field"><label>KI-Modell</label><div class="edit-row"><input value="${esc(activeLabel())}" disabled><button class="btn" data-a="models">Ändern</button></div></div>
+    <div class="field checks">
+      <label class="check"><input type="checkbox" id="sAutoFix" ${st.autoFix !== false ? 'checked' : ''}> 🔧 Automatische Reparatur: Wenn Code beim Ausführen abstürzt, behebt die KI den Fehler selbst und startet neu (bis zu ${MAX_REPAIR}×)</label>
+      <label class="check"><input type="checkbox" id="sWeb" ${st.web ? 'checked' : ''}> 🌐 Internet-Suche: Die KI darf selbst im Netz nachschauen</label>
+      <label class="check"><input type="checkbox" id="sTrust" ${st.runTrusted ? 'checked' : ''}> Programme ohne Nachfrage ausführen</label>
+    </div>
     <div class="field"><label>Updates</label><div class="edit-row"><input id="updStatus" value="${esc(S.update ? `Version ${S.update.current} · ${updateStatusText(S.update)}` : '')}" disabled><button class="btn" data-a="checkupd">Nach Updates suchen</button></div></div>
     <div class="actions between">
       <button class="btn danger" data-a="wipe">Alle Chats löschen</button>
@@ -1899,7 +2016,11 @@ $('#settingsBody').addEventListener('click', async (e) => {
     const st = S.settings;
     st.aiName = $('#sName').value.trim().slice(0, 24) || 'FORGE';
     st.temperature = +$('#sTemp').value;
+    st.autoFix = $('#sAutoFix').checked;
+    st.web = $('#sWeb').checked;
+    st.runTrusted = $('#sTrust').checked;
     saveSettings();
+    renderWebBtn();
     const ctx = +$('#sCtx').value;
     if (S.engine && ctx !== S.engine.ctx) forge.engine.setCtx(ctx);
     closeSettings();

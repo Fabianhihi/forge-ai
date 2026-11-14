@@ -250,9 +250,12 @@ app.on('second-instance', () => {
 app.whenReady().then(() => {
   log('info', `FORGE AI ${app.getVersion()} startet · ${process.platform} ${os.release()} · Electron ${process.versions.electron} · ${Math.round(os.totalmem() / 1024 ** 3)} GB RAM`);
   runner.handleProtocol();
+  runner.setLogger(log);
   createWindow();
   // Alles automatisch: Hardware erkennen → Modell holen → KI starten
   startWorker();
+  // Eingebautes Python leise im Hintergrund holen (einmalig), damit Python-Programme später sofort starten
+  setTimeout(() => runner.prefetchPython(log), Number(process.env.FORGE_PY_DELAY || 45000));
 });
 
 app.on('window-all-closed', () => app.quit());

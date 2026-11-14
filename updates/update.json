@@ -1,10 +1,10 @@
 {
-  "version": "1.9.0",
+  "version": "1.10.0",
   "runtime": "electron-45.3.2+nlc-3.22.3",
-  "notes": "Neu in 1.9.0: Die KIs können jetzt im Internet suchen und Webseiten lesen (🌐-Knopf im Eingabefeld, mit Quellen). Viel bessere 3D-Modelle: fertige Baupläne für Roblox-, Minecraft- und Lego-Figuren, Roboter, Autos, Häuser, Tiere, Bäume, Schwerter, Raumschiffe und Türme. Lose schwebende Teile werden automatisch angedockt, helle Farben werden nicht mehr überstrahlt, und Änderungen an Modellen klappen besser.",
+  "notes": "Neu in 1.10.0: Der Coder ist besser und braucht keine Downloads mehr. Alle Bots benutzen das Modell, das schon auf deinem PC ist – kein extra Modell-Download beim Bot-Wechsel. FORGE hat jetzt ein eingebautes Python (mit pygame, numpy, pillow, requests), das sich einmal automatisch im Hintergrund einrichtet – Python-Programme und -Spiele starten ohne Installation. Fehlende Python-Pakete werden automatisch nachinstalliert. Neue automatische Reparatur: Stürzt Code beim Ausführen ab, behebt die KI den Fehler selbst und startet ihn neu. Der Coder schreibt jetzt bevorzugt Code, der in FORGE sofort läuft.",
   "app": {
-    "file": "forge-app-1.9.0.json.gz",
-    "sha256": "1aca0351e675bb353210c375f777870eff98ad2140e10d2085cc1228d602af30",
-    "size": 504405
+    "file": "forge-app-1.10.0.json.gz",
+    "sha256": "54c6bc4be872e63b10b0b53223f3d43a000d1c0d4e8b976da64fb4490010e832",
+    "size": 512660
   }
 }

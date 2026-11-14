@@ -1,5 +1,6 @@
 // FORGE AI – Code ausführen: Web-Vorschau (Spiele, Webseiten) und Programme in vielen Sprachen
-const { protocol, BrowserWindow, shell } = require('electron');
+const { app, protocol, BrowserWindow, shell, net } = require('electron');
+const crypto = require('crypto');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
@@ -151,7 +152,8 @@ function detectRuntimes(force = false) {
       continue;
     }
     let found = null;
-    for (const [bin, pre] of L.detect) {
+    if (id === 'python' && forgePythonReady()) found = { bin: pyExe(), pre: [], version: 'FORGE-Python (eingebaut)', forge: true };
+    for (const [bin, pre] of found ? [] : L.detect) {
       const v = probe(bin, pre, L.versionArg, L.versionRe);
       if (v) {
         found = { bin, pre, version: v };
@@ -159,6 +161,8 @@ function detectRuntimes(force = false) {
       }
     }
     res[id] = { name: L.name, available: !!found, version: found && found.version, winget: isWin ? L.winget || null : null, url: L.url || null, _cmd: found };
+    // Python fehlt? Kein Problem: FORGE holt sein eingebautes Python automatisch
+    if (id === 'python' && !found && pythonPackSupported()) Object.assign(res[id], { available: true, auto: true, version: 'FORGE-Python (wird automatisch eingerichtet)' });
   }
   runtimeCache = res;
   return res;
@@ -197,8 +201,22 @@ function killTree(child) {
 async function start(id, { lang, files = {}, entry, cwd }, send) {
   const L = LANGS[lang];
   if (!L) throw new Error('Diese Sprache kann FORGE (noch) nicht ausführen: ' + lang);
-  const rt = detectRuntimes()[lang];
+  let rt = detectRuntimes()[lang];
   if (!rt || !rt.available) throw new Error(`MISSING:${lang}`);
+  if (rt.auto) {
+    // Eingebautes Python einmalig einrichten (läuft sonst schon im Hintergrund nach dem Start)
+    send('out', { stream: 'info', text: 'Richte das eingebaute Python ein (nur beim ersten Mal, ca. 1 Minute) …\n' });
+    try {
+      await ensurePython((st) => send('prep', st));
+    } catch (err) {
+      runtimeCache = null;
+      throw new Error(`MISSING:${lang}`);
+    }
+    runtimeCache = null;
+    rt = detectRuntimes()[lang];
+    if (!rt || !rt._cmd) throw new Error(`MISSING:${lang}`);
+    send('out', { stream: 'info', text: '✓ Python ist bereit (mit pygame, numpy, pillow, requests).\n' });
+  }
 
   // Dateien in einen eigenen Arbeitsordner schreiben (oder im Ordner der geöffneten Datei laufen)
   let dir = cwd;
@@ -217,6 +235,7 @@ async function start(id, { lang, files = {}, entry, cwd }, send) {
   }
 
   const env = { ...process.env, ...(L.env || {}) };
+  if (rt._cmd && rt._cmd.forge) Object.assign(env, { PYTHONNOUSERSITE: '1', PYGAME_HIDE_SUPPORT_PROMPT: '1' });
   let bin;
   let args;
   if (L.builtin) {
@@ -280,11 +299,15 @@ function stopAll() {
 const PIP_NAMES = { cv2: 'opencv-python', PIL: 'pillow', yaml: 'pyyaml', sklearn: 'scikit-learn', bs4: 'beautifulsoup4', dotenv: 'python-dotenv' };
 async function pipInstall(id, module, send) {
   const rt = detectRuntimes().python;
-  if (!rt || !rt.available) throw new Error('MISSING:python');
+  if (!rt || !rt.available || !rt._cmd) throw new Error('MISSING:python');
   const pkg = PIP_NAMES[module] || module;
   const c = rt._cmd;
-  send('out', { stream: 'info', text: `Installiere ${pkg} …\n` });
-  const child = spawn(c.bin, [...c.pre, '-m', 'pip', 'install', '--user', pkg], { windowsHide: true, env: { ...process.env, PYTHONIOENCODING: 'utf-8' } });
+  send('out', { stream: 'info', text: `Installiere ${pkg} automatisch …\n` });
+  const where = c.forge ? [] : ['--user']; // eingebautes Python: direkt in seinen eigenen Ordner
+  const child = spawn(c.bin, [...c.pre, '-m', 'pip', 'install', '--disable-pip-version-check', '--no-warn-script-location', ...where, pkg], {
+    windowsHide: true,
+    env: { ...process.env, PYTHONIOENCODING: 'utf-8', ...(c.forge ? { PYTHONNOUSERSITE: '1' } : {}) },
+  });
   procs.set(id, child);
   child.stdout.on('data', (d) => send('out', { stream: 'stdout', text: String(d) }));
   child.stderr.on('data', (d) => send('out', { stream: 'stderr', text: String(d) }));
@@ -310,4 +333,169 @@ function installRuntime(lang) {
   return true;
 }
 
-module.exports = { registerScheme, handleProtocol, createPreview, openPreviewWindow, publicRuntimes, start, input, stop, stopAll, pipInstall, installRuntime };
+// ======================================================================
+//        FORGE-Python: eingebautes Python mit pygame, numpy, pillow, requests
+// ======================================================================
+// Wird von GitHub (Release „python-N“ im FORGE-Repo) einmal automatisch geholt – ohne Installation, ohne Admin.
+const PY_PACK = { tag: 'python-2', file: 'forge-python-win64.zip', info: 'forge-python-win64.json' };
+let pyJob = null;
+const pyWatchers = new Set();
+let pyLog = () => {};
+
+function pythonPackSupported() {
+  return isWin || !!process.env.FORGE_PY_URL;
+}
+function pyRoot() {
+  return path.join(app.getPath('userData'), 'runtimes', 'python');
+}
+function pyExe() {
+  return isWin ? path.join(pyRoot(), 'python', 'python.exe') : path.join(pyRoot(), 'python', 'bin', 'python3');
+}
+function forgePythonReady() {
+  if (!pythonPackSupported()) return false;
+  try {
+    const ok = JSON.parse(fs.readFileSync(path.join(pyRoot(), 'ok.json'), 'utf8'));
+    return ok.tag === PY_PACK.tag && fs.existsSync(pyExe());
+  } catch {
+    return false;
+  }
+}
+function packBase() {
+  if (process.env.FORGE_PY_URL) return process.env.FORGE_PY_URL.replace(/\/+$/, '');
+  let repo = process.env.FORGE_UPDATE_REPO;
+  if (!repo) {
+    try {
+      repo = require(path.join(app.getAppPath(), 'package.json')).forge.updateRepo;
+    } catch {}
+  }
+  return `https://github.com/${repo || 'Fabianhihi/forge-ai'}/releases/download/${PY_PACK.tag}`;
+}
+
+async function getJson(url) {
+  const res = await net.fetch(url, { cache: 'no-store' });
+  if (!res.ok) throw new Error(`HTTP ${res.status} für ${url}`);
+  return res.json();
+}
+
+async function downloadTo(url, dest, size, onPct) {
+  const res = await net.fetch(url, { cache: 'no-store' });
+  if (!res.ok) throw new Error(`HTTP ${res.status} beim Laden von Python`);
+  const total = Number(res.headers.get('content-length')) || size || 0;
+  const out = fs.createWriteStream(dest);
+  const hash = crypto.createHash('sha256');
+  const reader = res.body.getReader();
+  let got = 0;
+  let last = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      const buf = Buffer.from(value);
+      hash.update(buf);
+      got += buf.length;
+      if (!out.write(buf)) await new Promise((r) => out.once('drain', r));
+      const pct = total ? Math.floor((got / total) * 100) : 0;
+      if (pct !== last) onPct((last = pct));
+    }
+  } finally {
+    await new Promise((r) => out.end(r));
+  }
+  return hash.digest('hex');
+}
+
+// Entpacken ohne die App einzufrieren (Windows hat tar.exe eingebaut, sonst PowerShell)
+async function extractZip(zip, dest) {
+  fs.mkdirSync(dest, { recursive: true });
+  const tries = isWin
+    ? [
+        [path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'tar.exe'), ['-xf', zip, '-C', dest]],
+        ['powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', `Expand-Archive -LiteralPath '${zip.replace(/'/g, "''")}' -DestinationPath '${dest.replace(/'/g, "''")}' -Force`]],
+      ]
+    : [['unzip', ['-oq', zip, '-d', dest]]];
+  let lastErr = null;
+  for (const [bin, args] of tries) {
+    const r = await new Promise((resolve) => {
+      let err = '';
+      const cp = spawn(bin, args, { windowsHide: true });
+      cp.stderr.on('data', (d) => (err += d).length > 2000 && (err = err.slice(-1000)));
+      cp.on('error', (e) => resolve({ ok: false, err: e.message }));
+      cp.on('close', (code) => resolve({ ok: code === 0, err: err.trim().slice(-300) || 'Code ' + code }));
+    });
+    if (r.ok) return;
+    lastErr = r.err;
+  }
+  throw new Error('Entpacken fehlgeschlagen: ' + lastErr);
+}
+
+// Eingebautes Python bereitstellen (einmalig). onState({ phase, pct }) für die Anzeige.
+function ensurePython(onState) {
+  if (forgePythonReady()) return Promise.resolve(pyExe());
+  if (onState) pyWatchers.add(onState);
+  const emit = (st) => {
+    for (const w of pyWatchers) {
+      try {
+        w(st);
+      } catch {}
+    }
+  };
+  if (!pyJob) {
+    pyJob = (async () => {
+      const root = pyRoot();
+      fs.mkdirSync(root, { recursive: true });
+      const base = packBase();
+      pyLog('info', 'FORGE-Python: lade von ' + base);
+      emit({ phase: 'download', pct: 0 });
+      const info = await getJson(`${base}/${PY_PACK.info}`);
+      const zip = path.join(root, 'download.zip');
+      let sha = null;
+      for (let attempt = 1; attempt <= 2; attempt++) {
+        try {
+          sha = await downloadTo(`${base}/${info.file || PY_PACK.file}`, zip, info.size, (pct) => emit({ phase: 'download', pct }));
+          if (!info.sha256 || sha === info.sha256) break;
+          throw new Error('Prüfsumme stimmt nicht');
+        } catch (err) {
+          if (attempt === 2) throw err;
+          pyLog('warn', 'FORGE-Python: neuer Versuch – ' + err.message);
+        }
+      }
+      emit({ phase: 'extract', pct: 100 });
+      const staging = path.join(root, 'neu');
+      fs.rmSync(staging, { recursive: true, force: true });
+      await extractZip(zip, staging);
+      const old = path.join(root, 'python');
+      fs.rmSync(old, { recursive: true, force: true });
+      fs.renameSync(path.join(staging, 'python'), old);
+      fs.rmSync(staging, { recursive: true, force: true });
+      fs.rmSync(zip, { force: true });
+      if (!fs.existsSync(pyExe())) throw new Error('python.exe fehlt im Paket');
+      fs.writeFileSync(path.join(root, 'ok.json'), JSON.stringify({ tag: PY_PACK.tag, sha256: sha, at: new Date().toISOString() }));
+      runtimeCache = null;
+      pyLog('info', 'FORGE-Python bereit: ' + pyExe());
+      emit({ phase: 'ready', pct: 100 });
+      return pyExe();
+    })()
+      .catch((err) => {
+        pyLog('warn', 'FORGE-Python fehlgeschlagen: ' + err.message);
+        emit({ phase: 'error', error: err.message });
+        throw err;
+      })
+      .finally(() => {
+        pyJob = null;
+        pyWatchers.clear();
+      });
+  }
+  return pyJob;
+}
+
+// Nach dem Start im Hintergrund vorbereiten, damit Python-Code später sofort läuft
+function prefetchPython(log) {
+  if (log) pyLog = log;
+  if (!pythonPackSupported() || forgePythonReady()) return;
+  ensurePython().catch(() => {});
+}
+
+function setLogger(log) {
+  if (log) pyLog = log;
+}
+
+module.exports = { registerScheme, handleProtocol, createPreview, openPreviewWindow, publicRuntimes, start, input, stop, stopAll, pipInstall, installRuntime, prefetchPython, forgePythonReady, setLogger };
