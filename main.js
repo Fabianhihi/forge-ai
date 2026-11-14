@@ -38,7 +38,42 @@ const updater = global.forgeUpdater || new (require('./updater').Updater)({ app,
 updater.log = log;
 updater.on('state', (st) => {
   if (win && !win.isDestroyed()) win.webContents.send('update:update', st);
+  // Live-Update: kleines App-Update ist fertig geladen → Oberfläche fragen, ob gerade ein guter Moment ist
+  if (st.status === 'ready' && st.kind === 'app') {
+    const ch = pendingChanges();
+    if (ch && win && !win.isDestroyed()) win.webContents.send('update:live', { version: ch.version, restart: ch.restart, engine: ch.engine, notes: st.notes || '' });
+  }
 });
+
+// Welche Dateien ändert das wartende Update? Danach richtet sich, ob ein Neuladen reicht.
+function pendingChanges() {
+  try {
+    const pending = JSON.parse(fs.readFileSync(path.join(updater.dir, 'pending.json'), 'utf8'));
+    const appDir = app.getAppPath();
+    const changed = pending.files.filter((rel) => {
+      try {
+        return !fs.readFileSync(path.join(pending.dir, rel)).equals(fs.readFileSync(path.join(appDir, rel)));
+      } catch {
+        return true;
+      }
+    });
+    return {
+      version: pending.version,
+      changed,
+      restart: changed.includes('main.js'),
+      engine: changed.some((f) => /^engine/.test(f)),
+    };
+  } catch {
+    return null;
+  }
+}
+
+let lastUpdateCheck = 0;
+function checkForUpdates() {
+  if (Date.now() - lastUpdateCheck < 60 * 1000) return;
+  lastUpdateCheck = Date.now();
+  updater.check().catch(() => {});
+}
 
 // ---------- KI-Motor läuft in eigenem Prozess ----------
 let worker = null;
@@ -120,6 +155,32 @@ function startWorker() {
     setTimeout(startWorker, 800);
   });
   w.postMessage({ type: 'init', dataDir: app.getPath('userData'), forceCpu });
+}
+
+// KI-Motor neu starten (z. B. nach einem Update) – zählt nicht als Absturz
+function restartWorker() {
+  const old = worker;
+  worker = null;
+  workerReady = false;
+  for (const c of calls.values()) c.reject(new Error('Der KI-Motor wird neu gestartet.'));
+  calls.clear();
+  lastState = { ...lastState, status: 'loading', message: 'KI-Motor wird aktualisiert …' };
+  broadcastState();
+  if (!old) return startWorker();
+  let started = false;
+  const go = () => {
+    if (!started) {
+      started = true;
+      startWorker();
+    }
+  };
+  old.once('exit', go); // erst starten, wenn der alte Motor den Grafikspeicher freigegeben hat
+  setTimeout(go, 5000);
+  try {
+    old.kill();
+  } catch {
+    go();
+  }
 }
 
 function call(method, ...args) {
@@ -243,9 +304,39 @@ ipcMain.handle('log:open', () => shell.showItemInFolder(path.join(app.getPath('u
 ipcMain.handle('update:state', () => updater.state);
 ipcMain.handle('update:check', () => updater.check({ manual: true }));
 ipcMain.handle('update:install', () => updater.installNow());
+let liveTimer = null;
 ipcMain.on('app:booted', () => {
   updater.confirmBoot();
-  updater.startAuto();
+  setTimeout(() => (updater.state.justUpdated = null), 4000);
+  if (!liveTimer) {
+    // Alle 5 Minuten und immer, wenn du zu FORGE zurückwechselst, nach Updates schauen
+    setTimeout(checkForUpdates, 6000);
+    liveTimer = setInterval(checkForUpdates, 5 * 60 * 1000);
+    if (win) win.on('focus', checkForUpdates);
+  } else if (updater.state.status === 'ready' && updater.state.kind === 'app') {
+    updater.set({}); // nach dem Neuladen erneut melden
+  }
+});
+
+// Update im laufenden Betrieb einspielen – ohne FORGE zu schließen
+ipcMain.handle('update:applyLive', () => {
+  if (chats.size) return { ok: false, busy: true };
+  const ch = pendingChanges();
+  if (!ch) return { ok: false };
+  if (!updater.applyPendingSync()) return { ok: false };
+  log('info', `Live-Update auf ${ch.version} (${ch.restart ? 'Neustart' : ch.engine ? 'Seite + KI-Motor neu' : 'Seite neu'}) · ${ch.changed.join(', ')}`);
+  if (ch.restart) {
+    // Hauptprogramm hat sich geändert → FORGE startet sich selbst in 2–3 Sekunden neu
+    quitting = true;
+    app.relaunch();
+    setTimeout(() => app.exit(0), 150);
+    return { ok: true, restart: true };
+  }
+  updater.version = ch.version;
+  updater.set({ status: 'idle', current: ch.version, latest: ch.version, kind: null });
+  if (ch.engine) restartWorker();
+  setTimeout(() => win && !win.isDestroyed() && win.webContents.reloadIgnoringCache(), 100);
+  return { ok: true };
 });
 
 ipcMain.handle('app:info', () => ({

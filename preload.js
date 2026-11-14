@@ -29,6 +29,10 @@ const updateListeners = new Set();
 ipcRenderer.on('update:update', (_e, st) => {
   for (const fn of updateListeners) fn(st);
 });
+const liveListeners = new Set();
+ipcRenderer.on('update:live', (_e, info) => {
+  for (const fn of liveListeners) fn(info);
+});
 
 contextBridge.exposeInMainWorld('forge', {
   info: () => ipcRenderer.invoke('app:info'),
@@ -59,6 +63,10 @@ contextBridge.exposeInMainWorld('forge', {
     },
     check: () => ipcRenderer.invoke('update:check'),
     install: () => ipcRenderer.invoke('update:install'),
+    onLive: (fn) => {
+      liveListeners.add(fn);
+    },
+    applyLive: () => ipcRenderer.invoke('update:applyLive'),
     booted: () => ipcRenderer.send('app:booted'),
   },
   copyLog: () => ipcRenderer.invoke('log:copy'),

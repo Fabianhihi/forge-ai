@@ -1,10 +1,10 @@
 {
-  "version": "1.5.0",
+  "version": "1.6.0",
   "runtime": "electron-45.3.2+nlc-3.22.3",
-  "notes": "Weniger Speicherhunger! 🧠\nStartet jetzt auch, wenn die Grafikkarte fast voll ist – ein Teil der KI läuft dann im normalen Arbeitsspeicher\nFlash Attention spart Grafikspeicher\nDie 3D-Ansicht braucht weniger Grafikspeicher\nUnten links siehst du, wie viel der KI auf der Grafikkarte läuft",
+  "notes": "Updates kommen jetzt live! 🔄\nNeue Versionen werden eingespielt, ohne dass du FORGE schließen musst\nFORGE schaut alle 5 Minuten und jedes Mal, wenn du ins Fenster zurückwechselst, nach Updates\nDein Chat, der 3D-Modus und angefangene Texte bleiben dabei erhalten\nMitten in einer Antwort wird nie unterbrochen – und mit „Später“ kannst du es verschieben",
   "app": {
-    "file": "forge-app-1.5.0.json.gz",
-    "sha256": "32dcb431e80fe6e65646a11f9602f76b7bfc7f42f98bd7d5dcdaedbeaa183355",
-    "size": 453698
+    "file": "forge-app-1.6.0.json.gz",
+    "sha256": "1fc0fab2a11876ffd3261f953612f5aff5807340698b0758ef3737c5d317e2a0",
+    "size": 456534
   }
 }

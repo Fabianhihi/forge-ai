@@ -1142,11 +1142,13 @@ function renderUpdate(u) {
   if (u.status === 'downloading') {
     bar.hidden = false;
     bar.innerHTML = `<div class="ub-row">${I.save}<span>Update ${esc(u.latest)} wird geladen … ${u.progress || 0} %</span></div><div class="progress"><div style="width:${u.progress || 0}%"></div></div>`;
+  } else if (u.status === 'ready' && S.liveCountdown) {
+    // Countdown läuft gerade (siehe Live-Update unten)
   } else if (u.status === 'ready') {
     bar.hidden = false;
     bar.innerHTML = `<div class="ub-row">${I.redo}<span><b>Update ${esc(u.latest)}</b> ist bereit</span></div>
-      <button class="btn sm primary wide" data-u="install">${u.kind === 'app' ? 'Jetzt neu starten' : 'Jetzt aktualisieren'}</button>
-      ${u.kind === 'app' ? '<div class="ub-hint">Sonst automatisch beim nächsten Start.</div>' : ''}`;
+      <button class="btn sm primary wide" data-u="${u.kind === 'app' ? 'live' : 'install'}">${u.kind === 'app' ? 'Jetzt einspielen' : 'Jetzt aktualisieren'}</button>
+      ${u.kind === 'app' ? '<div class="ub-hint">Läuft ohne Neustart – dein Chat bleibt offen.</div>' : ''}`;
   } else if (u.status === 'installing') {
     bar.hidden = false;
     bar.innerHTML = `<div class="ub-row"><span class="spinner"></span><span>Update wird installiert … FORGE startet gleich neu.</span></div>`;
@@ -1192,7 +1194,104 @@ function showUpdateCelebration({ version, notes }) {
 
 $('#updateBar').addEventListener('click', (e) => {
   if (e.target.closest('[data-u="install"]')) forge.update.install();
+  if (e.target.closest('[data-u="live"]') || e.target.closest('[data-u="now"]')) applyLiveNow();
+  if (e.target.closest('[data-u="later"]')) {
+    stopLiveCountdown();
+    S.liveDeferredUntil = Date.now() + 10 * 60 * 1000; // in 10 Minuten wieder fragen
+    setTimeout(() => S.live && scheduleLive(S.live), 10 * 60 * 1000 + 500);
+    if (S.update) renderUpdate(S.update);
+  }
 });
+
+// ---------- Live-Updates: einspielen, ohne FORGE zu schließen ----------
+function scheduleLive(info) {
+  S.live = info;
+  if (S.liveDeferredUntil && Date.now() < S.liveDeferredUntil) return;
+  if (S.liveCountdown) return;
+  // Nicht mitten in einer Antwort oder einem 3D-Modell unterbrechen
+  if (S.busy) {
+    clearTimeout(S.liveWait);
+    S.liveWait = setTimeout(() => scheduleLive(info), 2000);
+    return;
+  }
+  let left = 6;
+  const bar = $('#updateBar');
+  const draw = () => {
+    bar.hidden = false;
+    bar.innerHTML = `<div class="ub-row">⚡<span><b>Update ${esc(info.version)}</b> wird in ${left} s eingespielt${info.restart ? ' (FORGE startet kurz neu)' : ''}</span></div>
+      <div class="row-btns"><button class="btn sm primary" data-u="now">Jetzt</button><button class="btn sm ghost" data-u="later">Später</button></div>`;
+  };
+  draw();
+  S.liveCountdown = setInterval(() => {
+    if (S.busy) {
+      stopLiveCountdown();
+      return scheduleLive(info);
+    }
+    left--;
+    if (left <= 0) applyLiveNow();
+    else draw();
+  }, 1000);
+}
+
+function stopLiveCountdown() {
+  clearInterval(S.liveCountdown);
+  S.liveCountdown = null;
+}
+
+async function applyLiveNow() {
+  stopLiveCountdown();
+  if (S.busy) return scheduleLive(S.live || { version: (S.update && S.update.latest) || '' });
+  saveResume();
+  const bar = $('#updateBar');
+  bar.hidden = false;
+  bar.innerHTML = `<div class="ub-row"><span class="spinner"></span><span>Update wird eingespielt …</span></div>`;
+  const r = await forge.update.applyLive();
+  if (!r || !r.ok) {
+    localStorage.removeItem('forge.resume');
+    if (r && r.busy) return setTimeout(() => scheduleLive(S.live), 2000);
+    if (S.update) renderUpdate(S.update);
+  }
+}
+
+// Was gerade offen ist, merken – nach dem Neuladen geht es genau dort weiter
+function saveResume() {
+  store('forge.resume', {
+    t: Date.now(),
+    mode: S.mode,
+    convId: S.convId,
+    modelId: S.modelId,
+    input: $('#input').value,
+    prompt3d: $('#prompt3d').value,
+    edit3d: $('#edit3d').value,
+    detail: S.detail,
+    styles: [...S.styles],
+  });
+}
+
+function restoreResume() {
+  const r = load('forge.resume', null);
+  localStorage.removeItem('forge.resume');
+  if (!r || Date.now() - r.t > 3 * 60 * 1000) return;
+  if (r.convId && S.convs.some((c) => c.id === r.convId)) {
+    S.convId = r.convId;
+    renderConversation();
+  }
+  $('#input').value = r.input || '';
+  autosize();
+  $('#prompt3d').value = r.prompt3d || '';
+  $('#edit3d').value = r.edit3d || '';
+  if (r.detail) $$('#detailSeg button').forEach((b) => b.classList.toggle('active', +b.dataset.v === r.detail)), (S.detail = r.detail);
+  for (const st of r.styles || []) {
+    S.styles.add(st);
+    const chip = $(`#styleChips [data-s="${CSS.escape(st)}"]`);
+    if (chip) chip.classList.add('on');
+  }
+  if (r.mode === '3d') {
+    setMode('3d');
+    if (r.modelId && S.models.some((m) => m.id === r.modelId)) openSavedModel(r.modelId);
+  }
+  renderSideList();
+}
 
 // ======================================================================
 //                               Einstellungen
@@ -1287,7 +1386,9 @@ async function boot() {
   renderSideList();
   forge.engine.onUpdate(onEngine);
   onEngine(await forge.engine.state());
+  restoreResume();
   forge.update.onUpdate(renderUpdate);
+  forge.update.onLive(scheduleLive);
   renderUpdate(await forge.update.state());
   forge.update.booted();
   $('#input').focus();
