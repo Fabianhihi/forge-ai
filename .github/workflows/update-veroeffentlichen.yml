@@ -1,0 +1,32 @@
+# Veröffentlicht automatisch ein neues FORGE-AI-Update,
+# sobald updates/update.json mit einer neuen Version hochgeladen wird.
+name: Update veröffentlichen
+
+on:
+  push:
+    branches: [main]
+    paths: ['updates/update.json']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Release erstellen
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION=$(jq -r .version updates/update.json)
+          if gh release view "v$VERSION" >/dev/null 2>&1; then
+            echo "Release v$VERSION gibt es schon."
+            exit 0
+          fi
+          FILES="updates/update.json updates/$(jq -r .app.file updates/update.json)"
+          FULL=$(jq -r '.full.file // empty' updates/update.json)
+          if [ -n "$FULL" ] && [ -f "updates/$FULL" ]; then FILES="$FILES updates/$FULL"; fi
+          jq -r .notes updates/update.json > notes.txt
+          gh release create "v$VERSION" --title "FORGE AI $VERSION" --notes-file notes.txt $FILES

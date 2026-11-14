@@ -1,0 +1,10 @@
+{
+  "version": "1.3.1",
+  "runtime": "electron-45.3.2+nlc-3.22.3",
+  "notes": "Gratulation, es funktioniert!\nDein erstes automatisches Update ist angekommen\nAb jetzt kommen neue Funktionen ganz von selbst",
+  "app": {
+    "file": "forge-app-1.3.1.json.gz",
+    "sha256": "97849d35ff88fb95b81bfe5e38e0d9d8e2f39b7632ea066e6ef7b4cf58cef708",
+    "size": 450268
+  }
+}
