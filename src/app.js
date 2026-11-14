@@ -1,8 +1,8 @@
 // FORGE AI – Oberfläche
 import { Marked } from 'marked';
 import hljs from 'highlight.js/lib/common';
-import { BOTS, systemPromptFor, model3dSystemPrompt, MODEL_GRAMMAR, DETAIL_LEVELS, DETAIL_TOKENS, parseModelText, modelToText } from './prompts.js';
-import { Viewer3D, extractJson, normalizeModel } from './viewer3d.js';
+import { BOTS, systemPromptFor, model3dSystemPrompt, MODEL_GRAMMAR, DETAIL_LEVELS, DETAIL_TOKENS, parseModelText, modelToText, examplesFor, modelSource } from './prompts.js';
+import { Viewer3D, extractJson, normalizeModel, snapFloatingParts } from './viewer3d.js';
 
 const forge = window.forge;
 const $ = (s, el = document) => el.querySelector(s);
@@ -44,6 +44,7 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '
 const DEFAULTS = {
   aiName: 'FORGE',
   temperature: 0.3,
+  web: true,
 };
 
 const S = {
@@ -165,7 +166,7 @@ function onEngine(st) {
   }
   if (st.status === 'ready' && !wasReady) {
     const ab = BOTS[st.activeBot] ? st.activeBot : 'code';
-    forge.engine.preload([{ role: 'system', content: systemPromptFor(ab, S.settings.aiName) }]).catch(() => {});
+    forge.engine.preload([{ role: 'system', content: systemPromptFor(ab, S.settings.aiName, { web: S.settings.web }) }]).catch(() => {});
   }
 }
 
@@ -388,11 +389,25 @@ function fillAi(el, m, final, isLast) {
   const body = $('.body', el);
   let html = '';
   if (m.thinking) html += `<details class="think"><summary>Gedankengang</summary><div>${esc(m.thinking)}</div></details>`;
+  if (m.tool && m.tool.phase === 'error') html += `<div class="web-status err">🌐 Internet gerade nicht erreichbar – Antwort ohne Suche</div>`;
   if (m.content) html += `<div class="md ${final ? '' : 'cursor'}">${md.parse(m.content)}</div>`;
+  else if (!final && m.tool && webText(m.tool)) html += `<div class="web-status"><span class="spinner"></span>${esc(webText(m.tool))}</div>`;
   else if (!final && m.waiting) html += `<div class="waiting"><span class="spinner"></span>${esc(waitingText(m))}</div>`;
   else if (!final) html += `<div class="typing"><i></i><i></i><i></i></div>`;
   if (m.error) {
     html += `<div class="err-box">${esc(m.error.replace('NO_MODEL: ', ''))}<div><button class="btn sm" data-act="setup">KI-Modelle öffnen</button></div></div>`;
+  }
+  if (m.sources && m.sources.length && (m.content || final)) {
+    html += `<div class="sources"><span class="lbl">🌐 Quellen</span>${m.sources
+      .slice(0, 8)
+      .map((src, i) => {
+        let host = '';
+        try {
+          host = new URL(src.url).hostname.replace(/^www\./, '');
+        } catch {}
+        return `<button data-act="src" data-url="${esc(src.url)}" title="${esc(src.title)}\n${esc(src.url)}"><b>${i + 1}</b><span>${esc(src.title)}</span><i>${esc(host)}</i></button>`;
+      })
+      .join('')}</div>`;
   }
   if (final && (m.content || m.error)) {
     const activeId = S.engine && S.engine.active && S.engine.active.id;
@@ -403,6 +418,13 @@ function fillAi(el, m, final, isLast) {
   }
   body.innerHTML = html;
   decorateCodeblocks(body);
+}
+
+function webText(t) {
+  if (t.phase === 'search') return `Sucht im Internet: „${t.query}“ …`;
+  if (t.phase === 'read') return `Liest ${t.count === 1 ? 'eine Seite' : t.count + ' Seiten'}${t.hosts && t.hosts.length ? ` (${t.hosts.join(', ')})` : ''} …`;
+  if (t.phase === 'answer') return 'Schreibt die Antwort …';
+  return '';
 }
 
 function waitingText(m) {
@@ -499,10 +521,18 @@ async function sendMessage(regenerate = false) {
   const el = $('#messages').lastElementChild;
   scrollBottom(true);
 
+  const msgs = conv.messages.slice(0, -1).map(toPlain);
+  if (bot === 'design' && msgs.length) {
+    // Passende Bauplan-Beispiele unsichtbar an die Frage hängen (z. B. bei „Roblox-Charakter“)
+    const last = msgs[msgs.length - 1];
+    const ex = examplesFor(String(last.content), false);
+    if (ex.length) last.content += `\n\n(Hinweis für dich: So sieht ein gutes Modell im FORGE-Format für so etwas aus. Nutze die Baupläne genauso.\n\`\`\`forge3d\n${ex.join('\n\`\`\`\n\`\`\`forge3d\n')}\n\`\`\`)`;
+  }
   const req = {
-    messages: [{ role: 'system', content: systemPromptFor(bot, S.settings.aiName) }, ...conv.messages.slice(0, -1).map(toPlain)],
+    messages: [{ role: 'system', content: systemPromptFor(bot, S.settings.aiName, { web: S.settings.web }) }, ...msgs],
     temperature: bot === 'chat' ? Math.max(0.6, +S.settings.temperature) : +S.settings.temperature,
     bot,
+    web: !!S.settings.web,
   };
   S.waitingAi = { el, m: ai };
   setBusy(true);
@@ -514,6 +544,11 @@ async function sendMessage(regenerate = false) {
         ai.waiting = true;
         if (d.switching) ai.switching = d.switching;
       }
+      if (d.tool) {
+        ai.waiting = false;
+        ai.tool = d.tool;
+      }
+      if (d.sources) ai.sources = d.sources;
       if (d.text) {
         ai.waiting = false;
         ai.content += d.text;
@@ -528,6 +563,7 @@ async function sendMessage(regenerate = false) {
   } finally {
     delete ai.waiting;
     delete ai.switching;
+    if (ai.tool && ai.tool.phase !== 'error') delete ai.tool;
     S.waitingAi = null;
     finished.add(ai);
     S.streamId = null;
@@ -545,6 +581,7 @@ $('#messages').addEventListener('click', async (e) => {
   if (!btn) return;
   const act = btn.dataset.act;
   if (act === 'setup') return openModels();
+  if (act === 'src') return forge.openExternal(btn.dataset.url);
   if (act === 'regen') return sendMessage(true);
   if (act === 'copyall') {
     const conv = currentConv();
@@ -568,7 +605,8 @@ $('#messages').addEventListener('click', async (e) => {
     else if (r.error) toast(r.error, 'err');
   } else if (act === 'open3d') {
     try {
-      const m = normalizeModel(parseModelText(code));
+      const parsed = parseModelText(code);
+      const m = finishModel(parsed, code).model;
       setMode('3d');
       showModel(m);
       saveToLibrary(m, '(aus dem Chat)');
@@ -655,6 +693,20 @@ $('#attachList').addEventListener('click', (e) => {
   renderAttachments();
 });
 $('#attachBtn').addEventListener('click', () => $('#fileInput').click());
+
+// Internet-Suche an/aus
+function renderWebBtn() {
+  const on = !!S.settings.web;
+  $('#webBtn').classList.toggle('on', on);
+  $('#webBtn').title = on ? 'Internet-Suche: AN – die KI sucht selbst im Netz, wenn es nötig ist (klicken zum Ausschalten)' : 'Internet-Suche: AUS – die KI antwortet nur mit ihrem eigenen Wissen (klicken zum Einschalten)';
+}
+$('#webBtn').addEventListener('click', () => {
+  S.settings.web = !S.settings.web;
+  saveSettings();
+  renderWebBtn();
+  toast(S.settings.web ? '🌐 Internet-Suche an' : 'Internet-Suche aus – alles bleibt offline', 'ok');
+});
+renderWebBtn();
 $('#fileInput').addEventListener('change', (e) => {
   addFiles(e.target.files);
   e.target.value = '';
@@ -1176,6 +1228,15 @@ function ensureViewer() {
   return S.viewer;
 }
 
+// Fertiges KI-Modell: säubern, lose Teile andocken, Quelltext (mit Bauplänen) für spätere Änderungen merken
+function finishModel(raw, text) {
+  let m = normalizeModel(raw);
+  const snap = snapFloatingParts(m);
+  m = snap.model;
+  if (text) m.source = modelSource(m, text);
+  return { model: m, moved: snap.moved };
+}
+
 function showModel(model, keepCamera = false) {
   const v = ensureViewer();
   v.setModel(model, { keepCamera });
@@ -1237,13 +1298,20 @@ async function generate3D(editInstruction) {
   const before = editInstruction ? viewer.model : null;
   let userMsg;
   let maxTokens;
+  // Beispiele passend zur Anfrage (z. B. Roblox-Figur → Figur-Beispiel) als echte Gesprächsrunden
+  const shots = [];
   if (editInstruction) {
     if (!before) return;
-    userMsg = `Hier ist das aktuelle Modell:\n${modelToText(before)}\n\nÄnderungswunsch: ${editInstruction}\n\nGib das KOMPLETTE geänderte Modell im FORGE-Format zurück (alle Teile, auch die unveränderten).`;
-    maxTokens = Math.min(6000, 400 + before.parts.length * 60);
+    const src = before.source || modelToText(before);
+    userMsg = `Hier ist das aktuelle Modell:\n${src}\n\nÄnderungswunsch: ${editInstruction}\n\nGib das KOMPLETTE geänderte Modell im FORGE-Format zurück (alle Zeilen, auch die unveränderten). template-Zeilen bleiben template-Zeilen – ändere dort nur die Werte.`;
+    maxTokens = Math.min(6000, 400 + src.split('\n').length * 70);
   } else {
     const styles = [...S.styles].join(', ');
-    userMsg = `Baue dieses 3D-Modell: ${prompt}\n${styles ? `Stil: ${styles}\n` : ''}${DETAIL_LEVELS[S.detail]}`;
+    for (const ex of examplesFor(prompt + ' ' + styles)) {
+      shots.push({ role: 'user', content: `Baue dieses 3D-Modell: ${ex.split('\n')[0].replace(/^name:\s*/, '')}` });
+      shots.push({ role: 'assistant', content: ex });
+    }
+    userMsg = `Baue dieses 3D-Modell: ${prompt}\n${styles ? `Stil: ${styles}\n` : ''}${DETAIL_LEVELS[S.detail]}\nWenn ein Bauplan (template) passt, fang damit an und ergänze danach Details, die genau an den angegebenen Punkten sitzen.`;
     maxTokens = DETAIL_TOKENS[S.detail] || 1800;
   }
 
@@ -1289,6 +1357,7 @@ async function generate3D(editInstruction) {
       {
         messages: [
           { role: 'system', content: model3dSystemPrompt() },
+          ...shots,
           { role: 'user', content: userMsg },
         ],
         temperature: 0.45,
@@ -1309,14 +1378,18 @@ async function generate3D(editInstruction) {
       return;
     }
     let raw = parseModelText(text);
-    if (!raw.parts.length) raw = extractJson(text) || raw; // Notfall: falls doch JSON kommt
-    const m = normalizeModel(raw);
+    let src = text;
+    if (!raw.parts.length) {
+      raw = extractJson(text) || raw; // Notfall: falls doch JSON kommt
+      src = null;
+    }
+    const { model: m, moved } = finishModel(raw, src);
     showModel(m, true);
     if (!editInstruction) viewer.frame();
     saveToLibrary(m, editInstruction ? `${prompt} → ${editInstruction}` : prompt);
     if (editInstruction) $('#edit3d').value = '';
     const secs = Math.max(1, Math.round((performance.now() - t0) / 1000));
-    toast(`„${m.name}“ fertig – ${m.parts.length} Teile in ${secs} s`, 'ok');
+    toast(`„${m.name}“ fertig – ${m.parts.length} Teile in ${secs} s${moved ? ` · ${moved} lose Teile angedockt` : ''}`, 'ok');
   } catch (err) {
     if (before) showModel(before, true);
     toast(err.message.replace('NO_MODEL: ', ''), 'err');

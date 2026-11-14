@@ -64,7 +64,7 @@ function pendingChanges() {
       version: pending.version,
       changed,
       restart: changed.includes('main.js'),
-      engine: changed.some((f) => /^engine/.test(f)),
+      engine: changed.some((f) => /^(engine|web\.js)/.test(f)),
     };
   } catch {
     return null;
@@ -123,7 +123,7 @@ function startWorker() {
       case 'chat-error': {
         const wc = chats.get(msg.id);
         if (!wc || wc.isDestroyed()) break;
-        if (msg.type === 'chunk') wc.send('ai:chunk', msg.id, msg.waiting ? { waiting: true } : { text: msg.text });
+        if (msg.type === 'chunk') wc.send('ai:chunk', msg.id, msg.meta ? msg.meta : msg.waiting ? { waiting: true } : { text: msg.text });
         else if (msg.type === 'chat-done') wc.send('ai:done', msg.id, msg.result || {});
         else wc.send('ai:error', msg.id, msg.error);
         if (msg.type !== 'chunk') chats.delete(msg.id);

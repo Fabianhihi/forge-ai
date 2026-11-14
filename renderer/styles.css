@@ -400,3 +400,18 @@ body.resizing iframe { pointer-events: none; }
 .rp-missing p { color: var(--muted); }
 .rp-big { font-size: 46px; }
 .remember { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 13px; margin-top: 6px; }
+
+/* ---------- Internet ---------- */
+.web-btn { position: relative; }
+.web-btn.on { color: #4ea8ff; }
+.web-btn.on::after { content: ''; position: absolute; right: 6px; bottom: 6px; width: 6px; height: 6px; border-radius: 50%; background: #3ddc84; box-shadow: 0 0 0 2px var(--panel); }
+.web-status { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); margin: 2px 0 8px; }
+.web-status .spinner { flex: none; }
+.web-status.err { color: #e0a050; }
+.sources { margin-top: 10px; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.sources .lbl { font-size: 12px; color: var(--muted); margin-right: 2px; }
+.sources button { display: inline-flex; align-items: center; gap: 6px; max-width: 260px; border: 1px solid var(--line-2); background: var(--elev); color: var(--text); border-radius: 999px; padding: 3px 10px 3px 4px; font-size: 12px; cursor: pointer; }
+.sources button:hover { border-color: #4ea8ff; }
+.sources button b { flex: none; display: inline-grid; place-items: center; min-width: 18px; height: 18px; border-radius: 9px; background: #1d3550; color: #8cc8ff; font-size: 11px; }
+.sources button span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sources button i { font-style: normal; color: var(--muted); }

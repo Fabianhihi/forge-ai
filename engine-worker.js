@@ -41,7 +41,7 @@ port.on('message', async (e) => {
       const result = await engine.chat(
         msg.req,
         (text, meta) => {
-          if (meta && meta.waiting) post({ type: 'chunk', id: msg.id, waiting: true });
+          if (meta) post({ type: 'chunk', id: msg.id, meta });
           else if (text) post({ type: 'chunk', id: msg.id, text });
         },
         ac.signal

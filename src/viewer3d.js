@@ -6,6 +6,10 @@ import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
+
+// Nur leuchtende Teile (Material „glow“) bekommen den Glüh-Effekt
+const BLOOM_LAYER = 1;
 import { GLTFExporter } from 'three/addons/exporters/GLTFExporter.js';
 import { STLExporter } from 'three/addons/exporters/STLExporter.js';
 import { OBJExporter } from 'three/addons/exporters/OBJExporter.js';
@@ -100,10 +104,17 @@ export function normalizeModel(raw) {
       color: color(p.color),
       material: MATERIALS.includes(mat) ? mat : 'plastic',
       ...(p.mirrorX ? { mirrorX: true } : {}),
+      ...(p.mirrorX && Number.isFinite(+p.mirrorAt) && +p.mirrorAt ? { mirrorAt: +p.mirrorAt } : {}),
+      ...(p.fromTemplate ? { fromTemplate: String(p.fromTemplate) } : {}),
     });
   }
   if (!parts.length) throw new Error('Das Modell enthält keine Teile');
-  return { name: String(raw.name || 'Modell').slice(0, 80), plan: String(raw.plan || ''), parts };
+  return {
+    name: String(raw.name || 'Modell').slice(0, 80),
+    plan: String(raw.plan || ''),
+    parts,
+    ...(raw.source ? { source: String(raw.source).slice(0, 20000) } : {}),
+  };
 }
 
 export function compactModel(model) {
@@ -235,6 +246,122 @@ function buildMaterial(p) {
   }
 }
 
+// ---------- Schwebende Teile andocken ----------
+// Kleine KI-Modelle setzen Details (Augen, Hut, Knöpfe …) oft ein Stück neben den Körper.
+// Kleine, lose Teilgruppen werden bis an die nächste Fläche des Hauptkörpers geschoben.
+export function snapFloatingParts(model) {
+  const parts = model.parts;
+  if (parts.length < 2) return { model, moved: 0 };
+  const boxes = parts.map((p) => {
+    let geo;
+    try {
+      geo = buildGeometry(p);
+    } catch {
+      geo = new THREE.BoxGeometry(0.1, 0.1, 0.1);
+    }
+    const mesh = new THREE.Mesh(geo);
+    mesh.position.set(...p.position);
+    mesh.rotation.set(p.rotation[0] * DEG, p.rotation[1] * DEG, p.rotation[2] * DEG);
+    mesh.updateMatrixWorld(true);
+    const b = new THREE.Box3().setFromObject(mesh);
+    geo.dispose();
+    const list = [b];
+    if (p.mirrorX) {
+      const a = p.mirrorAt || 0;
+      const m = b.clone();
+      m.min.x = 2 * a - b.max.x;
+      m.max.x = 2 * a - b.min.x;
+      list.push(m);
+    }
+    return list;
+  });
+  const all = new THREE.Box3();
+  boxes.flat().forEach((b) => all.union(b));
+  const diag = all.getSize(new THREE.Vector3()).length() || 1;
+  const tol = diag * 0.012;
+  const touch = (i, j) => boxes[i].some((a) => boxes[j].some((b) => a.clone().expandByScalar(tol).intersectsBox(b)));
+  // Gruppen aus sich berührenden Teilen bilden
+  const group = parts.map((_, i) => i);
+  const find = (i) => (group[i] === i ? i : (group[i] = find(group[i])));
+  for (let i = 0; i < parts.length; i++)
+    for (let j = i + 1; j < parts.length; j++) if (find(i) !== find(j) && touch(i, j)) group[find(i)] = find(j);
+  const clusters = new Map();
+  const vol = (i) => boxes[i].reduce((n, b) => {
+    const s = b.getSize(new THREE.Vector3());
+    return n + Math.max(s.x, 0.01) * Math.max(s.y, 0.01) * Math.max(s.z, 0.01);
+  }, 0);
+  parts.forEach((_, i) => {
+    const r = find(i);
+    if (!clusters.has(r)) clusters.set(r, { idx: [], vol: 0 });
+    const c = clusters.get(r);
+    c.idx.push(i);
+    c.vol += vol(i);
+  });
+  if (clusters.size < 2) return { model, moved: 0 };
+  const groundY = all.min.y;
+  const list = [...clusters.values()].sort((a, b) => b.vol - a.vol);
+  for (const c of list) {
+    c.box = new THREE.Box3();
+    c.idx.forEach((i) => c.box.union(boxes[i][0]));
+    c.boxes = c.idx.flatMap((i) => boxes[i]);
+    c.ground = c.box.min.y <= groundY + tol; // steht auf dem Boden → eigenes Objekt, bleibt wo es ist
+    c.template = c.idx.some((i) => parts[i].fromTemplate);
+    c.mirror = c.idx.some((i) => parts[i].mirrorX);
+    c.keep = c.idx.some((i) => /wolke|cloud|partikel|funke|stern|halo|schein|rauch|flamme|blase|schatten/i.test(parts[i].name));
+  }
+  // Kleinste Verschiebung, bis die Gruppe ein Teil der anderen Gruppe berührt (in Original-Koordinaten)
+  const gapTo = (c, k) => {
+    let best = null;
+    for (const mb of k.boxes) {
+      const cb = c.box;
+      const d = new THREE.Vector3(
+        cb.min.x > mb.max.x ? mb.max.x - cb.min.x : cb.max.x < mb.min.x ? mb.min.x - cb.max.x : 0,
+        cb.min.y > mb.max.y ? mb.max.y - cb.min.y : cb.max.y < mb.min.y ? mb.min.y - cb.max.y : 0,
+        cb.min.z > mb.max.z ? mb.max.z - cb.min.z : cb.max.z < mb.min.z ? mb.min.z - cb.max.z : 0
+      );
+      if (!best || d.length() < best.length()) best = d;
+    }
+    return best;
+  };
+  // Jede lose Gruppe hängt an der nächsten größeren Gruppe und wandert mit ihr mit
+  list[0].delta = new THREE.Vector3();
+  for (let n = 1; n < list.length; n++) {
+    const c = list[n];
+    c.delta = new THREE.Vector3();
+    if (c.ground || c.template) continue;
+    let parent = null;
+    let gap = null;
+    for (let k = 0; k < n; k++) {
+      const g = gapTo(c, list[k]);
+      if (g && (!gap || g.length() < gap.length())) {
+        gap = g;
+        parent = list[k];
+      }
+    }
+    if (!parent) continue;
+    c.delta.copy(parent.delta);
+    if (c.keep || gap.length() > diag * 0.25) continue;
+    if (gap.x && c.mirror) gap.x = 0; // Spiegelteile nicht über die Spiegelachse schieben
+    if (gap.length() < tol * 0.5) continue;
+    // ein kleines Stück überlappen lassen, damit keine Ritze bleibt
+    const o = Math.min(0.01, tol);
+    gap.set(gap.x && gap.x + Math.sign(gap.x) * o, gap.y && gap.y + Math.sign(gap.y) * o, gap.z && gap.z + Math.sign(gap.z) * o);
+    c.delta.add(gap);
+  }
+  let moved = 0;
+  const out = parts.map((p) => ({ ...p, position: [...p.position] }));
+  for (const c of list) {
+    if (!c.delta || c.delta.lengthSq() < 1e-10) continue;
+    for (const i of c.idx) {
+      out[i].position[0] += c.delta.x;
+      out[i].position[1] += c.delta.y;
+      out[i].position[2] += c.delta.z;
+      moved++;
+    }
+  }
+  return { model: moved ? { ...model, parts: out } : model, moved };
+}
+
 export function buildModelGroup(model) {
   const group = new THREE.Group();
   group.name = model.name || 'Modell';
@@ -250,18 +377,20 @@ export function buildModelGroup(model) {
     mesh.name = p.name;
     mesh.position.set(...p.position);
     mesh.rotation.set(p.rotation[0] * DEG, p.rotation[1] * DEG, p.rotation[2] * DEG);
-    mesh.castShadow = true;
+    mesh.castShadow = p.material !== 'glow';
     mesh.receiveShadow = true;
     mesh.userData.partIndex = i;
+    if (p.material === 'glow') mesh.layers.enable(BLOOM_LAYER);
     group.add(mesh);
     if (p.mirrorX) {
       const m2 = new THREE.Mesh(mirrorGeometry(geo), mat);
       m2.name = p.name + ' (gespiegelt)';
-      m2.position.set(-p.position[0], p.position[1], p.position[2]);
+      m2.position.set(2 * (p.mirrorAt || 0) - p.position[0], p.position[1], p.position[2]);
       m2.rotation.set(p.rotation[0] * DEG, -p.rotation[1] * DEG, -p.rotation[2] * DEG);
-      m2.castShadow = true;
+      m2.castShadow = p.material !== 'glow';
       m2.receiveShadow = true;
       m2.userData.partIndex = i;
+      if (p.material === 'glow') m2.layers.enable(BLOOM_LAYER);
       group.add(m2);
     }
   });
@@ -328,11 +457,29 @@ export class Viewer3D {
     this.grid.material.opacity = 0.6;
     this.scene.add(this.grid);
 
+    // Selektives Leuchten: erst nur die Glow-Teile rendern und weichzeichnen, dann über das Bild legen
+    this.bloomLayer = new THREE.Layers();
+    this.bloomLayer.set(BLOOM_LAYER);
+    this.darkMat = new THREE.MeshBasicMaterial({ color: 0x000000 });
+    this.bloomComposer = new EffectComposer(this.renderer);
+    this.bloomComposer.renderToScreen = false;
+    this.bloomComposer.addPass(new RenderPass(this.scene, this.camera));
+    this.bloom = new UnrealBloomPass(new THREE.Vector2(256, 256), 0.7, 0.35, 0.0);
+    this.bloomComposer.addPass(this.bloom);
+    const mix = new ShaderPass(
+      new THREE.ShaderMaterial({
+        uniforms: { baseTexture: { value: null }, bloomTexture: { value: this.bloomComposer.renderTarget2.texture } },
+        vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
+        fragmentShader: 'uniform sampler2D baseTexture; uniform sampler2D bloomTexture; varying vec2 vUv; void main(){ gl_FragColor = texture2D(baseTexture, vUv) + texture2D(bloomTexture, vUv); }',
+      }),
+      'baseTexture'
+    );
+    mix.needsSwap = true;
     this.composer = new EffectComposer(this.renderer);
     this.composer.addPass(new RenderPass(this.scene, this.camera));
-    this.bloom = new UnrealBloomPass(new THREE.Vector2(256, 256), 0.55, 0.45, 0.92);
-    this.composer.addPass(this.bloom);
+    this.composer.addPass(mix);
     this.composer.addPass(new OutputPass());
+    this._saved = new Map();
 
     this.model = null;
     this.modelGroup = null;
@@ -352,7 +499,7 @@ export class Viewer3D {
       const moved = this.controls.update();
       if (moved || this._dirty || this.controls.autoRotate) {
         this._dirty = false;
-        this.composer.render();
+        this.renderFrame();
       }
     };
     loop();
@@ -362,12 +509,44 @@ export class Viewer3D {
     this._dirty = true;
   }
 
+  renderFrame() {
+    // 1) Leuchtschicht: alles außer Glow-Teilen schwarz
+    const bg = this.scene.background;
+    const gridVis = this.grid.visible;
+    this.scene.background = null;
+    this.grid.visible = false;
+    let hasGlow = false;
+    this.scene.traverse((o) => {
+      if (!o.isMesh) return;
+      if (this.bloomLayer.test(o.layers)) {
+        hasGlow = true;
+        return;
+      }
+      this._saved.set(o, o.material);
+      o.material = this.darkMat;
+    });
+    if (hasGlow) {
+      const au = this.renderer.shadowMap.autoUpdate;
+      this.renderer.shadowMap.autoUpdate = false; // Schatten nur einmal pro Bild berechnen
+      this.bloomComposer.render();
+      this.renderer.shadowMap.autoUpdate = au;
+    }
+    else this.renderer.setRenderTarget(this.bloomComposer.renderTarget2), this.renderer.clear(), this.renderer.setRenderTarget(null);
+    for (const [o, m] of this._saved) o.material = m;
+    this._saved.clear();
+    this.scene.background = bg;
+    this.grid.visible = gridVis;
+    // 2) Normales Bild + Leuchten
+    this.composer.render();
+  }
+
   resize() {
     this._dirty = true;
     const w = Math.max(this.container.clientWidth, 1);
     const h = Math.max(this.container.clientHeight, 1);
     this.renderer.setSize(w, h);
     this.composer.setSize(w, h);
+    if (this.bloomComposer) this.bloomComposer.setSize(w, h);
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
   }
@@ -466,7 +645,7 @@ export class Viewer3D {
   }
 
   screenshot() {
-    this.composer.render();
+    this.renderFrame();
     return this.renderer.domElement.toDataURL('image/png');
   }
 

@@ -4,6 +4,7 @@ const path = require('path');
 const fs = require('fs');
 const os = require('os');
 const { EventEmitter } = require('events');
+const web = require('./web');
 
 const HF = (process.env.FORGE_HF_BASE || 'https://huggingface.co').replace(/\/+$/, '');
 const hf = (repo, file) => `${HF}/${repo}/resolve/main/${file}?download=true`;
@@ -622,6 +623,121 @@ class Engine extends EventEmitter {
     });
   }
 
+  // ---------- Internet ----------
+  async _grammarFor(schema) {
+    const key = JSON.stringify(schema);
+    let g = this.grammarCache.get(key);
+    if (!g) {
+      g = await this.llama.createGrammarForJsonSchema(schema);
+      this.grammarCache.set(key, g);
+    }
+    return g;
+  }
+
+  // Kurze Vorab-Frage an die KI: Braucht diese Nachricht eine Websuche? Wenn ja, wonach?
+  async _decideSearch(messages, signal) {
+    const today = new Date().toLocaleDateString('de-DE', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+    const lastText = String(messages[messages.length - 1].content || '');
+    const before = messages
+      .slice(1, -1)
+      .slice(-4)
+      .map((m) => `${m.role === 'user' ? 'Nutzer' : 'KI'}: ${String(m.content || '').replace(/```[\s\S]*?```/g, '[Code]').slice(0, 300)}`)
+      .join('\n');
+    const forced = /\b(such|google|recherchier|im internet|im netz|online nach|web ?such|nachschauen|schau nach)/i.test(lastText);
+    this.session.setChatHistory([
+      {
+        type: 'system',
+        text: `Du entscheidest nur, ob für die Antwort eine Internet-Suche nötig ist. Heute ist ${today}.
+Suche, wenn die Antwort aktuelle oder genaue Fakten braucht: Nachrichten, Ereignisse, Preise, Wetter, Versionen, Release-Daten, Personen, Firmen, Produkte, Spiele-Updates, Dokumentation zu Bibliotheken/APIs, oder wenn der Nutzer es ausdrücklich will.
+Nicht suchen bei: normalem Programmieren, Erklären von Grundlagen, Plaudern, Rechnen, Texten schreiben, 3D-Modelle bauen.
+"suche" = kurze Suchanfrage (2–8 Wörter) in der passendsten Sprache.`,
+      },
+    ]);
+    const grammar = await this._grammarFor({
+      type: 'object',
+      properties: { internet: { type: 'boolean' }, suche: { type: 'string', maxLength: 90 } },
+      required: ['internet', 'suche'],
+    });
+    const out = await this.session.prompt(`${before ? `Bisheriges Gespräch:\n${before}\n\n` : ''}Neue Nachricht: ${lastText.slice(0, 1500)}\n\nAntworte als JSON.`, {
+      grammar,
+      temperature: 0,
+      maxTokens: 80,
+      signal,
+      stopOnAbortSignal: true,
+    });
+    let r;
+    try {
+      r = grammar.parse(out);
+    } catch {
+      return forced ? lastText.slice(0, 120) : null;
+    }
+    const q = String((r && r.suche) || '').trim();
+    if ((r && r.internet) || forced) return q || lastText.slice(0, 120);
+    return null;
+  }
+
+  async _webContext(messages, onText, signal) {
+    const last = messages[messages.length - 1];
+    const ctx = (this.context && this.context.contextSize) || 4096;
+    const budget = Math.max(1200, Math.min(9000, (ctx - 2500) * 2)); // Zeichen für Internet-Text
+    const urls = web.findUrls(last.content).slice(0, 2);
+    const sources = [];
+    let block = '';
+    try {
+      // 1) Links in der Nachricht direkt lesen
+      if (urls.length) {
+        onText(null, { tool: { phase: 'read', count: urls.length, hosts: urls.map((u) => new URL(u).hostname) } });
+        for (const u of urls) {
+          try {
+            const pg = await web.readPage(u, { signal, maxChars: Math.floor(budget / urls.length) });
+            sources.push({ title: pg.title, url: pg.url });
+            block += `\n[${sources.length}] ${pg.title} – ${pg.url}\n${pg.text}\n`;
+          } catch (err) {
+            block += `\n(Die Seite ${u} konnte nicht geladen werden: ${err.message})\n`;
+          }
+          if (signal.aborted) return null;
+        }
+      }
+      // 2) Sonst: Muss gesucht werden? (Lange Code-Nachrichten brauchen fast nie eine Suche → spart Zeit)
+      let query = null;
+      const forced = /\b(such|google|recherchier|im internet|im netz|online nach|web ?such|nachschauen|schau nach)/i.test(last.content);
+      const codeHeavy = /```/.test(last.content) || last.content.length > 2500;
+      if (!urls.length && (forced || !codeHeavy)) {
+        query = await this._decideSearch(messages, signal);
+        if (signal.aborted) return null;
+      }
+      if (query) {
+        onText(null, { tool: { phase: 'search', query } });
+        const { results } = await web.search(query, { signal, log: (l, t) => this.log(l, t) });
+        if (signal.aborted) return null;
+        // Die besten 2 Seiten öffnen (parallel, mit Zeitlimit)
+        const top = results.slice(0, 2);
+        onText(null, { tool: { phase: 'read', count: top.length, hosts: top.map((r) => new URL(r.url).hostname), query } });
+        const per = Math.floor((budget - 1200) / Math.max(1, top.length));
+        const pages = await Promise.all(top.map((r) => web.readPage(r.url, { signal, maxChars: Math.max(600, per) }).catch(() => null)));
+        if (signal.aborted) return null;
+        results.forEach((r, i) => {
+          sources.push({ title: r.title, url: r.url });
+          const pg = pages[i];
+          block += `\n[${sources.length}] ${r.title} – ${r.url}\n${r.snippet || ''}\n`;
+          if (pg && pg.text) block += `Seiteninhalt:\n${pg.text}\n`;
+        });
+      }
+    } catch (err) {
+      if (signal.aborted) return null;
+      this.log('warn', 'Internet: ' + err.message);
+      onText(null, { tool: { phase: 'error', error: err.message } });
+      return `\n\n[Hinweis: Die Internet-Suche hat nicht geklappt (${err.message}). Antworte mit deinem eigenen Wissen und sag kurz, dass du gerade nicht nachschauen konntest.]`;
+    }
+    if (!sources.length && !block) {
+      onText(null, { tool: { phase: 'none' } });
+      return null;
+    }
+    onText(null, { sources, tool: { phase: 'answer' } });
+    const today = new Date().toLocaleDateString('de-DE', { day: 'numeric', month: 'long', year: 'numeric' });
+    return `\n\n---\nINTERNET-ERGEBNISSE (abgerufen am ${today}):${block.slice(0, budget + 1500)}\n---\nNutze diese Ergebnisse für deine Antwort, wenn sie zur Frage passen. Nenne die genutzten Quellen im Text als [1], [2] usw. Erfinde keine Fakten, die nicht in den Ergebnissen oder deinem sicheren Wissen stehen. Wenn die Ergebnisse nicht passen, sag das ehrlich.`;
+  }
+
   // ---------- Chat ----------
   chat(req, onText, signal) {
     const job = this.queue.then(() => this._chat(req, onText, signal));
@@ -629,7 +745,7 @@ class Engine extends EventEmitter {
     return job;
   }
 
-  async _chat({ messages, temperature = 0.3, schema, gbnf, maxTokens, bot }, onText, signal) {
+  async _chat({ messages, temperature = 0.3, schema, gbnf, maxTokens, bot, web: useWeb }, onText, signal) {
     // Anderer Bot mit anderem Modell? Dann zuerst umschalten (ggf. mit Download).
     if (bot && BOTS.includes(bot)) {
       const aborted = new Promise((r) => signal.addEventListener('abort', r, { once: true }));
@@ -653,7 +769,13 @@ class Engine extends EventEmitter {
     if (signal.aborted) return { aborted: true };
     const toItem = (m) =>
       m.role === 'system' ? { type: 'system', text: m.content } : m.role === 'user' ? { type: 'user', text: m.content } : { type: 'model', response: [m.content || ''] };
-    const last = messages[messages.length - 1];
+    let last = messages[messages.length - 1];
+    // Internet: erst entscheiden, ob gesucht werden muss, dann Ergebnisse an die Frage hängen
+    if (useWeb && !schema && !gbnf && last && last.role === 'user') {
+      const extra = await this._webContext(messages, onText, signal);
+      if (signal.aborted) return { aborted: true };
+      if (extra) last = { ...last, content: last.content + extra };
+    }
     this.session.setChatHistory(messages.slice(0, -1).map(toItem));
     let grammar;
     if (schema || gbnf) {

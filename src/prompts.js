@@ -18,6 +18,8 @@ Regeln:
 - Wenn du dir bei etwas unsicher bist, sag es ehrlich.`;
 }
 
+import { expandTemplate, TEMPLATE_NAMES } from './templates.js';
+
 // ---------- Die drei Bots ----------
 export const BOTS = {
   chat: {
@@ -85,10 +87,14 @@ Bei reinen Fragen (Tipps, Erklärungen) antwortest du normal ohne Codeblock. Ant
 ${FORGE3D_RULES}`;
 }
 
-export function systemPromptFor(bot, name) {
-  if (bot === 'chat') return chatSystemPrompt(name);
-  if (bot === 'design') return designSystemPrompt(name);
-  return codeSystemPrompt(name);
+const WEB_NOTE = `
+
+INTERNET
+Du hast Internet-Zugang: FORGE sucht automatisch im Netz, wenn eine Frage aktuelle Infos braucht, und hängt die Ergebnisse (mit Nummern [1], [2] …) an die Nachricht des Nutzers an. Nutze sie und nenne die Quellen. Sag nie, dass du kein Internet hast – außer ein Hinweis sagt, dass die Suche gerade nicht geklappt hat.`;
+
+export function systemPromptFor(bot, name, opts = {}) {
+  const base = bot === 'chat' ? chatSystemPrompt(name) : bot === 'design' ? designSystemPrompt(name) : codeSystemPrompt(name);
+  return opts.web ? base + WEB_NOTE : base;
 }
 
 export const SHAPES = ['box', 'sphere', 'cylinder', 'cone', 'torus', 'capsule', 'wedge', 'lathe', 'extrude'];
@@ -156,6 +162,22 @@ FORMEN und größe
 - lathe: Rotationskörper (Vasen, Flaschen, Kuppeln, Säulen). größe = 1. Dazu "points radius y, radius y, ..." von unten nach oben.
 - extrude: flache Umrissform mit Dicke (Klingen, Flügel, Flossen, Sterne). größe = dicke. Dazu "points x y, x y, ..." als Umriss.
 
+BAUPLÄNE – benutze sie IMMER, wenn das Modell dazu passt (sie sehen viel besser aus als selbst gebaut):
+template | humanoid | style=roblox | skin=#f8d95b | shirt=#2f6fde | pants=#2b2f3a | shoes=#1b1d24 | hair=short | haircolor=#3b2a1e | sleeves=none | item=none | cape=none
+   → Figuren, Menschen, Roblox-/Minecraft-/Lego-Charaktere, Ritter, Ninjas, Helden.
+     style=roblox|minecraft|lego · hair=none|short|long|cap|spiky|helmet · sleeves=none|short|long · item=none|sword|shield|staff|gun|pickaxe · cape=none|#farbe · backpack=yes|no
+     Wichtige Punkte für Extras: Kopf oben y=2.3, Gesicht vorne z=0.28, Schultern y=1.8 x=±0.68, Hände y=0.95 x=±0.68, Rücken z=-0.23, Füße y=0
+template | robot | color=#d9822b | accent=#3b4252 | glow=#36e0ff | weapons=cannons   → Roboter, Mechs (weapons=cannons|blades|none)
+template | car | color=#d22b2b | type=sport   → Autos (type=sport|suv|truck)
+template | house | wall=#e8d8b0 | roof=#a33b2b | floors=2   → Häuser
+template | tree | type=round | leaves=#3f9a3f   → Bäume (type=round|pine|blocky|palm, fruit=none|#farbe)
+template | sword | blade=#cfd8e3 | glow=no   → Schwerter
+template | spaceship | color=#cfd6e6 | glow=#36e0ff   → Raumschiffe
+template | tower | stone=#8a8f99 | roof=#5a3a7a   → Burg- und Wachtürme
+template | animal | type=dog | color=#b07a4a   → Tiere (type=dog|cat|pig|cow|horse|sheep|fox|bear)
+Optional bei jedem Bauplan: pos=x,y,z (verschieben) und scale=2 (größer). Mehrere Baupläne in einem Modell sind erlaubt.
+Danach kannst du mit normalen Zeilen Extras ergänzen (Hut, Waffe, Krone, Flügel …). Für alles andere baust du aus Grundformen.
+
 MATERIAL: matte, plastic, metal, glass, glow (leuchtet), wood, stone
 MIRROR: "| mirror" erzeugt automatisch eine Spiegelkopie auf der anderen Seite (bei -x). Nutze das für Arme, Beine, Räder, Flügel, Augen. Das Original kommt auf die +x Seite.
 
@@ -180,7 +202,11 @@ ${FORGE3D_RULES}`;
 // Grammatik für das FORGE-Format: erzwingt gültige Zeilen und spart viele Token gegenüber JSON
 export const MODEL_GRAMMAR = String.raw`root ::= "name: " title "\n" part{1,90}
 title ::= [^\n|]{1,48}
-part ::= shape " | " label " | " size " | " vec3 " | " vec3 " | " color " | " material mirror? points? "\n"
+part ::= (tpl | prim) "\n"
+prim ::= shape " | " label " | " size " | " vec3 " | " vec3 " | " color " | " material mirror? points?
+tpl ::= "template | " tname (" | " kv){0,14}
+tname ::= "humanoid" | "robot" | "car" | "house" | "tree" | "sword" | "spaceship" | "tower" | "animal"
+kv ::= [a-z]{2,12} "=" [^\n| ]{1,24}
 shape ::= "box" | "sphere" | "cylinder" | "cone" | "torus" | "capsule" | "wedge" | "lathe" | "extrude"
 label ::= [^\n|]{1,32}
 num ::= "-"? [0-9]{1,3} ("." [0-9]{1,3})?
@@ -191,9 +217,18 @@ material ::= "matte" | "plastic" | "metal" | "glass" | "glow" | "wood" | "stone"
 mirror ::= " | mirror"
 points ::= " | points " num " " num (", " num " " num){1,23}`;
 
-// Eine Zeile im FORGE-Format → Teil (oder null)
+// Eine Zeile im FORGE-Format → Teil (oder null). Template-Zeilen → { template, params }
 export function parseModelLine(line) {
   const cols = String(line).split('|').map((c) => c.trim());
+  if (/^template$/i.test(cols[0]) && cols[1]) {
+    const params = {};
+    for (const c of cols.slice(2)) {
+      const m = c.match(/^([a-zA-Z]+)\s*=\s*(.+)$/);
+      if (m) params[m[1].toLowerCase()] = m[2].trim();
+    }
+    const t = cols[1].toLowerCase();
+    return TEMPLATE_NAMES.includes(t) ? { template: t, params } : null;
+  }
   if (cols.length < 7) return null;
   const nums = (t) => (t.match(/-?\d+(?:\.\d+)?/g) || []).map(Number);
   const part = {
@@ -206,7 +241,11 @@ export function parseModelLine(line) {
     material: cols[6].toLowerCase(),
   };
   for (const extra of cols.slice(7)) {
-    if (/^mirror/i.test(extra)) part.mirrorX = true;
+    if (/^mirror/i.test(extra)) {
+      part.mirrorX = true;
+      const at = extra.match(/@\s*(-?\d+(?:\.\d+)?)/);
+      if (at && Number(at[1])) part.mirrorAt = Number(at[1]);
+    }
     else if (/^points/i.test(extra)) {
       part.points = extra
         .replace(/^points\s*/i, '')
@@ -235,7 +274,8 @@ export function parseModelText(text) {
       continue;
     }
     const p = parseModelLine(line);
-    if (p) parts.push(p);
+    if (p && p.template) parts.push(...expandTemplate(p.template, p.params));
+    else if (p) parts.push(p);
   }
   return { name, parts };
 }
@@ -246,11 +286,21 @@ export function modelToText(model) {
   const lines = [`name: ${model.name}`];
   for (const p of model.parts) {
     let line = `${p.shape} | ${p.name} | ${p.size.map(r).join(' ')} | ${p.position.map(r).join(' ')} | ${p.rotation.map(r).join(' ')} | ${p.color} | ${p.material}`;
-    if (p.mirrorX) line += ' | mirror';
+    if (p.mirrorX) line += p.mirrorAt ? ` | mirror@${r(p.mirrorAt)}` : ' | mirror';
     if (p.points && p.points.length) line += ' | points ' + p.points.map((pt) => pt.map(r).join(' ')).join(', ');
     lines.push(line);
   }
   return lines.join('\n');
+}
+
+// Quelltext eines Modells: Bauplan-Zeilen bleiben erhalten (kurz und leicht änderbar), der Rest als normale Zeilen
+export function modelSource(model, text) {
+  const tpl = String(text || '')
+    .split('\n')
+    .map((l) => l.trim())
+    .filter((l) => /^template\s*\|/i.test(l) && parseModelLine(l));
+  const own = { name: model.name, parts: model.parts.filter((p) => !p.fromTemplate) };
+  return [`name: ${model.name}`, ...tpl, ...modelToText(own).split('\n').slice(1)].join('\n');
 }
 
 export const DETAIL_TOKENS = { 1: 900, 2: 1800, 3: 3600 };
@@ -260,3 +310,78 @@ export const DETAIL_LEVELS = {
   2: 'Baue das Modell mit etwa 12 bis 25 Teilen und ein paar schönen Details.',
   3: 'Baue das Modell detailliert mit etwa 30 bis 50 Teilen.',
 };
+
+// ---------- Passende Beispiele für die Anfrage (machen kleine Modelle viel besser) ----------
+const EXAMPLES = [
+  {
+    keys: /roblox|charakter|character|figur|avatar|mensch|person|junge|mädchen|ninja|ritter|krieger|held|soldat|zauberer|steve|noob|skin|spieler/i,
+    text: `name: Roblox-Ninja
+template | humanoid | style=roblox | skin=#f8d95b | shirt=#1d1d1d | pants=#1d1d1d | shoes=#111111 | hair=none | sleeves=long | item=sword | itemcolor=#d8e3f0
+box | Stirnband | 0.6 0.08 0.6 | 0 2.2 0 | 0 0 0 | #c0392b | matte
+box | Stirnband Ende | 0.08 0.25 0.04 | 0.12 2.08 -0.3 | 0 0 15 | #c0392b | matte | mirror
+box | Gürtel | 0.92 0.1 0.47 | 0 0.95 0 | 0 0 0 | #c0392b | matte`,
+  },
+  {
+    keys: /minecraft|blockig|pixel/i,
+    text: `name: Minecraft-Abenteurer
+template | humanoid | style=minecraft | skin=#c68c5c | shirt=#2aa6a6 | pants=#3b3f9e | shoes=#555555 | hair=short | haircolor=#3b2a1e | sleeves=short | item=pickaxe`,
+  },
+  {
+    keys: /robot|roboter|mech|android|cyborg/i,
+    text: `name: Kampf-Mech
+template | robot | color=#2e7d32 | accent=#263238 | glow=#ff3b3b | weapons=cannons
+box | Antenne | 0.03 0.5 0.03 | 0.18 3.25 -0.05 | 0 0 8 | #c0c6d4 | metal`,
+  },
+  {
+    keys: /auto|car|wagen|rennwagen|truck|lkw|fahrzeug|jeep/i,
+    text: `name: Rennwagen
+template | car | color=#1565c0 | type=sport | accent=#111111
+box | Rennstreifen | 0.3 0.01 4.2 | 0 0.86 0 | 0 0 0 | #ffffff | plastic`,
+  },
+  {
+    keys: /haus|house|hütte|villa|gebäude|home/i,
+    text: `name: Gemütliches Haus
+template | house | wall=#f2e2c2 | roof=#8e2b2b | floors=2 | door=#5a3a1e
+box | Briefkasten | 0.3 0.25 0.2 | 2.6 1.0 3.2 | 0 0 0 | #c0392b | metal`,
+  },
+  {
+    keys: /burg|schloss|castle|festung|turm|tower/i,
+    text: `name: Kleine Burg
+template | tower | stone=#8a8f99 | roof=#5a3a7a | pos=-4,0,0
+template | tower | stone=#8a8f99 | roof=#5a3a7a | pos=4,0,0
+box | Mauer | 6.6 3.5 1 | 0 1.75 0 | 0 0 0 | #858a94 | stone
+box | Burgtor | 1.6 2.4 0.2 | 0 1.2 0.55 | 0 0 0 | #5a3a1e | wood`,
+  },
+  {
+    keys: /baum|tree|wald|pflanze|palme/i,
+    text: `name: Apfelbaum
+template | tree | type=round | leaves=#3f9a3f | fruit=#e53935`,
+  },
+  {
+    keys: /schwert|sword|klinge|waffe|katana|dolch/i,
+    text: `name: Frostklinge
+template | sword | blade=#7fd6ff | glow=yes | guard=#c0c6d4 | gem=#36e0ff`,
+  },
+  {
+    keys: /raumschiff|spaceship|rakete|ufo|jet|flugzeug|starfighter/i,
+    text: `name: Sternenjäger
+template | spaceship | color=#cfd6e6 | accent=#263238 | glow=#ff7a1a | stripe=#c0392b`,
+  },
+  {
+    keys: /hund|katze|tier|pferd|kuh|schwein|schaf|fuchs|bär|dog|cat|animal|pet/i,
+    text: `name: Treuer Hund
+template | animal | type=dog | color=#b07a4a | color2=#4a3020
+box | Halsband | 0.42 0.06 0.08 | 0 0.95 0.55 | 0 0 0 | #c0392b | plastic`,
+  },
+];
+
+const BASIC_EXAMPLE = `name: Fliegenpilz
+cylinder | Stiel | 0.12 0.5 0.15 | 0 0.25 0 | 0 0 0 | #f4ead5 | matte
+lathe | Hut | 1 | 0 0.45 0 | 0 0 0 | #d32f2f | plastic | points 0 0, 0.4 0, 0.38 0.12, 0.25 0.25, 0 0.3
+sphere | Punkt | 0.05 | 0.15 0.68 0.15 | 0 0 0 | #ffffff | matte | mirror
+sphere | Punkt hinten | 0.05 | 0.1 0.7 -0.18 | 0 0 0 | #ffffff | matte`;
+
+export function examplesFor(request, fallback = true) {
+  const hits = EXAMPLES.filter((e) => e.keys.test(request)).slice(0, 2).map((e) => e.text);
+  return hits.length || !fallback ? hits : [BASIC_EXAMPLE];
+}

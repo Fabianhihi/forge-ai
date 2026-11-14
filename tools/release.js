@@ -44,6 +44,7 @@ const FILES = [
   'engine.js',
   'engine-worker.js',
   'runner.js',
+  'web.js',
   'renderer/index.html',
   'renderer/styles.css',
   'renderer/hljs.css',
