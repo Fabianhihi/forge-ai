@@ -147,6 +147,7 @@ const dlPct = (d) => (d && d.total ? Math.floor((d.received / d.total) * 100) : 
 function onEngine(st) {
   const wasReady = S.engine && S.engine.status === 'ready';
   if (st.notice && (!S.engine || S.engine.notice !== st.notice)) toast(st.notice, 'err');
+  if (st.memNote && st.status === 'ready' && (!S.engine || S.engine.memNote !== st.memNote)) toast(st.memNote);
   S.engine = st;
   renderStatus();
   updateModelLabels();
@@ -165,10 +166,13 @@ function renderStatus() {
   el.classList.remove('on', 'off', 'busy');
   let text;
   switch (st.status) {
-    case 'ready':
+    case 'ready': {
       el.classList.add('on');
-      text = `Bereit · ${st.active.params} · ${gpuLabel(st.hardware)}`;
+      const share = st.active.gpuShare;
+      const where = st.hardware && st.hardware.gpu && share != null && share < 100 ? (share === 0 ? 'RAM' : `Grafikkarte ${share} %`) : gpuLabel(st.hardware);
+      text = `Bereit · ${st.active.params} · ${where}`;
       break;
+    }
     case 'downloading':
       el.classList.add('busy');
       text = `Lade Modell … ${dlPct(st.download)} %`;
@@ -1011,6 +1015,7 @@ function renderError() {
     <div class="actions between">
       <button class="btn ghost" data-a="copylog">Fehlerbericht kopieren</button>
       <div style="display:flex;gap:8px">
+        ${S.update && S.update.status === 'ready' ? `<button class="btn primary" data-a="installupd">Update ${esc(S.update.latest)} installieren</button>` : ''}
         <button class="btn" data-a="models">Anderes Modell wählen</button>
         <button class="btn primary" data-a="retry">Nochmal versuchen</button>
       </div>
@@ -1052,6 +1057,7 @@ function renderModels() {
     ${st.status === 'idle' && !st.active ? '<div class="notice">Wähle ein Modell, damit deine KI starten kann.</div>' : ''}
     ${custom ? `<div class="notice">Aktiv: eigenes Modell <b>${esc(st.active.params)}</b></div>` : ''}
     ${st.notice ? `<div class="notice">${esc(st.notice)}</div>` : ''}
+    ${st.memNote ? `<div class="notice">${esc(st.memNote)}</div>` : ''}
     ${st.status === 'ready' ? `<div class="notice small">⚡ Läuft auf: <b>${st.hardware && st.hardware.gpu ? 'Grafikkarte' : 'Prozessor (langsamer)'}</b>${S.lastTps ? ` · zuletzt <b>${S.lastTps.toFixed(1).replace('.', ',')} Token/s</b>` : ''}. Kleinere Modelle sind schneller, größere klüger.</div>` : ''}
     <div class="model-cards">${cards}</div>
     <div class="actions between">
@@ -1081,6 +1087,7 @@ $('#setupBody').addEventListener('click', async (e) => {
   if (a === 'close') closeModels();
   else if (a === 'models') openModels();
   else if (a === 'retry') forge.engine.retry();
+  else if (a === 'installupd') forge.update.install();
   else if (a === 'copylog') {
     await forge.copyLog();
     toast('Fehlerbericht kopiert – jetzt im Chat mit Strg+V einfügen', 'ok');
@@ -1150,6 +1157,7 @@ function renderUpdate(u) {
   }
   const st = $('#updStatus');
   if (st) st.value = `Version ${u.current} · ${updateStatusText(u)}`;
+  if (S.engine && S.engine.status === 'error' && !$('#setup').hidden) renderError();
 }
 
 // Nach einem automatischen Update: Gratulation mit Konfetti
@@ -1191,15 +1199,15 @@ $('#updateBar').addEventListener('click', (e) => {
 // ======================================================================
 function openSettings() {
   const st = S.settings;
-  const ctx = (S.engine && S.engine.ctx) || 16384;
+  const ctx = (S.engine && S.engine.ctx) || 8192;
   $('#settingsBody').innerHTML = `
     <h2>Einstellungen</h2>
     <p>Alles bleibt auf deinem PC.</p>
     <div class="field"><label>Name deiner KI</label><input id="sName" maxlength="24" value="${esc(st.aiName)}"></div>
     <div class="two">
       <div class="field"><label>Kreativität: <span id="tVal">${String(st.temperature).replace('.', ',')}</span></label><input id="sTemp" type="range" min="0" max="1.2" step="0.05" value="${st.temperature}"><span class="hint">Niedrig = genauer Code, hoch = kreativer</span></div>
-      <div class="field"><label>Gedächtnis (Kontext)</label><select id="sCtx">${[8192, 16384, 32768, 65536]
-        .map((n) => `<option value="${n}" ${n === ctx ? 'selected' : ''}>${n.toLocaleString('de-DE')} Token</option>`)
+      <div class="field"><label>Gedächtnis (Kontext)</label><select id="sCtx">${[4096, 8192, 16384, 32768]
+        .map((n) => `<option value="${n}" ${n === ctx ? 'selected' : ''}>${n.toLocaleString('de-DE')} Token${n === 8192 ? ' (empfohlen)' : n === 4096 ? ' (spart Speicher)' : ''}</option>`)
         .join('')}</select><span class="hint">Mehr = längere Chats, braucht mehr Speicher</span></div>
     </div>
     <div class="field"><label>KI-Modell</label><div class="edit-row"><input value="${esc(activeLabel())}" disabled><button class="btn" data-a="models">Ändern</button></div></div>

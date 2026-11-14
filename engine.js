@@ -407,19 +407,74 @@ class Engine extends EventEmitter {
   async load(modelPath, active, run) {
     await this.unload();
     this.runId = run;
-    this.set({ status: 'loading', message: 'Starte deine KI …', active, loadProgress: 0, error: null });
+    this.set({ status: 'loading', message: 'Starte deine KI …', active, loadProgress: 0, error: null, memNote: null });
     const onLoadProgress = (p) => {
       if (run === this.runId) this.set({ loadProgress: Math.round(p * 100) });
     };
+    const want = Math.max(4096, this.config.ctx || 8192);
+
+    // Wie viele Schichten hat das Modell? (für die Speicher-Stufen unten)
+    let totalLayers = null;
     try {
-      this.model = await this.llama.loadModel({ modelPath, gpuLayers: 'auto', onLoadProgress });
-    } catch (err) {
-      this.log('warn', 'Laden mit GPU fehlgeschlagen, versuche CPU: ' + err.message);
-      this.model = await this.llama.loadModel({ modelPath, gpuLayers: 0, onLoadProgress });
+      const insights = await this.lib.GgufInsights.from(await this.lib.readGgufFileInfo(modelPath), this.llama);
+      totalLayers = insights.totalLayers;
+    } catch {}
+
+    // Speicher-Stufen: so viel wie möglich auf die Grafikkarte, den Rest in den normalen RAM.
+    // Ist die Grafikkarte voll (z. B. weil ein Spiel läuft), wird stufenweise mehr in den RAM verlagert,
+    // statt mit „zu wenig Speicher“ abzubrechen.
+    const steps = [];
+    if (this.llama.gpu) {
+      steps.push({ label: 'auto', gpuLayers: { fitContext: { contextSize: want } } });
+      if (totalLayers) for (const f of [0.85, 0.7, 0.55, 0.4, 0.25, 0.1]) steps.push({ label: Math.round(f * 100) + '%', gpuLayers: Math.max(1, Math.floor(totalLayers * f)) });
     }
+    steps.push({ label: 'cpu', gpuLayers: 0 });
+
+    let lastErr = null;
+    for (const step of steps) {
+      if (run !== this.runId) return;
+      for (const fa of [true, 'auto']) {
+        let model = null;
+        try {
+          // Flash Attention spart Grafikspeicher, wenn die Hardware es kann
+          model = await this.llama.loadModel({ modelPath, gpuLayers: step.gpuLayers, onLoadProgress, defaultContextFlashAttention: fa });
+          if (run !== this.runId) {
+            await model.dispose();
+            return;
+          }
+          const context = await model.createContext({
+            contextSize: { min: 2048, max: want },
+            failedCreationRemedy: { retries: 6, autoContextSizeShrink: 0.2 },
+          });
+          this.model = model;
+          this.context = context;
+          break;
+        } catch (err) {
+          lastErr = err;
+          this.log('warn', `Laden (${step.label}, FA ${fa}) fehlgeschlagen: ${err.message}`);
+          if (model) await model.dispose().catch(() => {});
+          // Fehler, die nichts mit Flash Attention zu tun haben → gleich nächste Stufe
+          if (!/flash|attention|unsupported|not supported/i.test(String(err.message))) break;
+        }
+      }
+      if (this.model) break;
+    }
+    if (!this.model) throw lastErr || new Error('Modell konnte nicht geladen werden');
     if (run !== this.runId) return;
-    const max = Math.max(4096, this.config.ctx || 8192);
-    this.context = await this.model.createContext({ contextSize: { min: 4096, max } });
+
+    const onGpu = this.model.gpuLayers;
+    const share = totalLayers ? Math.min(100, Math.round((onGpu / totalLayers) * 100)) : onGpu > 0 ? 100 : 0;
+    let memNote = null;
+    if (this.llama.gpu && share < 100) {
+      memNote =
+        share === 0
+          ? 'Die Grafikkarte war voll – die KI läuft gerade nur im Arbeitsspeicher (langsamer). Schließ Spiele oder andere Programme und starte FORGE neu.'
+          : `Wenig Grafikspeicher frei – ${share} % der KI laufen auf der Grafikkarte, der Rest im Arbeitsspeicher (etwas langsamer). Schließ Spiele oder andere Programme für volle Geschwindigkeit.`;
+    }
+    this.log('info', `Modell geladen: ${onGpu}/${totalLayers || '?'} Schichten auf der Grafikkarte, Kontext ${this.context.contextSize}`);
+    this.gpuShare = share;
+    this.memNote = memNote;
+
     // Token-Vorhersage: Wiederholt die KI Teile der Eingabe (Code ändern, 3D-Modell ändern),
     // werden mehrere Token auf einmal geprüft statt einzeln – das Ergebnis bleibt identisch.
     let sequence;
@@ -437,7 +492,8 @@ class Engine extends EventEmitter {
       status: 'ready',
       message: '',
       loadProgress: 100,
-      active: { ...active, gpuLayers: this.model.gpuLayers, ctx: this.context.contextSize },
+      active: { ...active, gpuLayers: this.model.gpuLayers, gpuShare: this.gpuShare, ctx: this.context.contextSize },
+      memNote: this.memNote,
     });
     this._resolveReady();
   }
@@ -510,7 +566,7 @@ class Engine extends EventEmitter {
 function friendly(err) {
   const m = String((err && err.message) || err);
   if (/fetch failed|ENOTFOUND|ECONNRESET|ETIMEDOUT|EAI_AGAIN|network/i.test(m)) return 'Keine Internetverbindung für den Modell-Download. Prüfe dein Internet und versuch es nochmal.';
-  if (/out of memory|alloc|VRAM|insufficient/i.test(m)) return 'Nicht genug Speicher für dieses Modell. Wähle ein kleineres Modell.';
+  if (/out of memory|alloc|VRAM|insufficient/i.test(m)) return 'Nicht genug Speicher für dieses Modell. Schließ Spiele oder andere Programme, die die Grafikkarte nutzen, oder wähle ein kleineres Modell.';
   return m;
 }
 
