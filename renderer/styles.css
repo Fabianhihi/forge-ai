@@ -320,3 +320,39 @@ details.think div { white-space: pre-wrap; margin-top: 6px; max-height: 260px; o
 @keyframes wiggle { 0%, 100% { transform: rotate(-8deg); } 50% { transform: rotate(8deg) scale(1.08); } }
 .msg-meta .speed-tip { color: var(--accent-2); background: var(--accent-soft); }
 .msg-meta .speed-tip:hover { color: #fff; background: rgba(255, 122, 26, .22); }
+
+/* ---------- Bots ---------- */
+.tb-left { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.bot-switch { position: relative; flex: none; }
+.bot-chip { display: inline-flex; align-items: center; gap: 8px; padding: 6px 10px 6px 12px; border-radius: 999px; border: 1px solid var(--line-2); background: var(--panel); font-weight: 650; font-size: 13px; }
+.bot-chip:hover { border-color: #3d4560; }
+.bot-chip svg { width: 15px; height: 15px; color: var(--muted); }
+.bot-dot { width: 9px; height: 9px; border-radius: 50%; flex: none; box-shadow: 0 0 8px currentColor; }
+.bot-menu { position: absolute; top: calc(100% + 8px); left: 0; z-index: 30; width: 300px; background: var(--panel-2); border: 1px solid var(--line-2); border-radius: 14px; padding: 6px; box-shadow: 0 20px 50px -15px #000; display: flex; flex-direction: column; gap: 2px; }
+.bot-menu button { display: grid; grid-template-columns: 14px 1fr; column-gap: 10px; align-items: center; text-align: left; border: 0; background: none; padding: 9px 10px; border-radius: 10px; }
+.bot-menu button:hover, .bot-menu button.active { background: var(--elev); }
+.bot-menu button b { font-size: 13.5px; }
+.bot-menu button span:last-child { grid-column: 2; color: var(--muted); font-size: 12px; }
+.bot-picker { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin: -14px 0 18px; }
+.bot-card { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; text-align: left; padding: 14px 16px; border-radius: 14px; border: 1px solid var(--line); background: var(--panel); transition: .15s; position: relative; overflow: hidden; }
+.bot-card::before { content: ""; position: absolute; inset: 0; background: radial-gradient(120% 90% at 0% 0%, var(--bot), transparent 60%); opacity: .08; transition: .15s; }
+.bot-card:hover { border-color: #3d4560; }
+.bot-card.active { border-color: var(--bot); box-shadow: 0 0 0 3px color-mix(in srgb, var(--bot) 22%, transparent); }
+.bot-card.active::before { opacity: .2; }
+.bot-card .bot-ic, .bot-tab .bot-ic { font-size: 20px; line-height: 1; color: var(--bot); }
+.bot-card b { font-size: 15px; }
+.bot-card span:last-child { color: var(--muted); font-size: 12.5px; }
+.sugg:hover { border-color: color-mix(in srgb, var(--bot, #4a3424) 60%, transparent); }
+.bot-tabs { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 4px 0 14px; }
+.bot-tab { display: flex; flex-direction: column; align-items: flex-start; gap: 3px; text-align: left; padding: 11px 13px; border-radius: 12px; border: 1px solid var(--line-2); background: var(--bg); }
+.bot-tab.active { border-color: var(--bot); box-shadow: 0 0 0 3px color-mix(in srgb, var(--bot) 20%, transparent); }
+.bot-tab b { font-size: 14px; }
+.bot-tab span:last-child { color: var(--muted); font-size: 12px; }
+.model-card { display: flex; align-items: center; gap: 12px; margin: 0 0 14px; padding: 12px 14px; border-radius: 13px; border: 1px solid color-mix(in srgb, #a78bfa 45%, var(--line-2)); background: linear-gradient(135deg, rgba(167, 139, 250, .12), rgba(167, 139, 250, .03)); }
+.mc-icon { width: 42px; height: 42px; border-radius: 11px; display: grid; place-items: center; font-size: 22px; color: #1b1035; background: linear-gradient(135deg, #c4b5fd, #8b5cf6); flex: none; }
+.mc-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.mc-info b { font-size: 14.5px; }
+.mc-info > span { color: var(--muted); font-size: 12.5px; display: flex; align-items: center; gap: 8px; }
+.mc-sw { display: inline-flex; gap: 3px; }
+.mc-sw i { width: 10px; height: 10px; border-radius: 3px; box-shadow: inset 0 0 0 1px rgba(255,255,255,.15); }
+.mc-actions { display: flex; gap: 6px; }

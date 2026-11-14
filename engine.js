@@ -11,11 +11,12 @@ const hf = (repo, file) => `${HF}/${repo}/resolve/main/${file}?download=true`;
 const CATALOG = [
   {
     id: 'leicht',
+    kind: 'code',
     title: 'Leicht',
     params: '3B',
     file: 'Qwen2.5-Coder-3B-Instruct-Q4_K_M.gguf',
     size: 1.93e9,
-    desc: 'Für Laptops und PCs ohne starke Grafikkarte. Schnell, aber einfacher.',
+    desc: 'Schneller Coder für Laptops und PCs ohne starke Grafikkarte.',
     urls: [
       hf('bartowski/Qwen2.5-Coder-3B-Instruct-GGUF', 'Qwen2.5-Coder-3B-Instruct-Q4_K_M.gguf'),
       hf('lmstudio-community/Qwen2.5-Coder-3B-Instruct-GGUF', 'Qwen2.5-Coder-3B-Instruct-Q4_K_M.gguf'),
@@ -23,11 +24,12 @@ const CATALOG = [
   },
   {
     id: 'standard',
+    kind: 'code',
     title: 'Empfohlen',
     params: '7B',
     file: 'Qwen2.5-Coder-7B-Instruct-Q4_K_M.gguf',
     size: 4.68e9,
-    desc: 'Guter Allrounder für Grafikkarten ab 6 GB oder PCs mit 16 GB RAM.',
+    desc: 'Guter Coder für Grafikkarten ab 6 GB.',
     urls: [
       hf('bartowski/Qwen2.5-Coder-7B-Instruct-GGUF', 'Qwen2.5-Coder-7B-Instruct-Q4_K_M.gguf'),
       hf('lmstudio-community/Qwen2.5-Coder-7B-Instruct-GGUF', 'Qwen2.5-Coder-7B-Instruct-Q4_K_M.gguf'),
@@ -35,11 +37,12 @@ const CATALOG = [
   },
   {
     id: 'stark',
+    kind: 'code',
     title: 'Stark',
     params: '14B',
     file: 'Qwen2.5-Coder-14B-Instruct-Q4_K_M.gguf',
     size: 8.99e9,
-    desc: 'Deutlich klüger. Für Grafikkarten mit 12 GB oder mehr.',
+    desc: 'Deutlich klügerer Coder. Für Grafikkarten mit 12 GB oder mehr.',
     urls: [
       hf('bartowski/Qwen2.5-Coder-14B-Instruct-GGUF', 'Qwen2.5-Coder-14B-Instruct-Q4_K_M.gguf'),
       hf('lmstudio-community/Qwen2.5-Coder-14B-Instruct-GGUF', 'Qwen2.5-Coder-14B-Instruct-Q4_K_M.gguf'),
@@ -47,21 +50,67 @@ const CATALOG = [
   },
   {
     id: 'ultra',
+    kind: 'code',
     title: 'Ultra',
     params: '30B',
     file: 'Qwen3-Coder-30B-A3B-Instruct-Q4_K_M.gguf',
     size: 18.6e9,
-    desc: 'Das beste lokale Coding-Modell. Für 24 GB Grafikkarten oder 32 GB+ RAM.',
+    desc: 'Das beste lokale Coding-Modell. Für 24-GB-Grafikkarten oder 32 GB+ RAM (dann langsamer).',
     urls: [
       hf('lmstudio-community/Qwen3-Coder-30B-A3B-Instruct-GGUF', 'Qwen3-Coder-30B-A3B-Instruct-Q4_K_M.gguf'),
       hf('unsloth/Qwen3-Coder-30B-A3B-Instruct-GGUF', 'Qwen3-Coder-30B-A3B-Instruct-Q4_K_M.gguf'),
     ],
   },
+  // ---------- Allround-Modelle für den Chat-Bot ----------
+  {
+    id: 'chat-leicht',
+    kind: 'chat',
+    title: 'Leicht',
+    params: '3B',
+    file: 'Qwen2.5-3B-Instruct-Q4_K_M.gguf',
+    size: 1.93e9,
+    desc: 'Schneller Allrounder für schwächere PCs.',
+    urls: [
+      hf('bartowski/Qwen2.5-3B-Instruct-GGUF', 'Qwen2.5-3B-Instruct-Q4_K_M.gguf'),
+      hf('lmstudio-community/Qwen2.5-3B-Instruct-GGUF', 'Qwen2.5-3B-Instruct-Q4_K_M.gguf'),
+    ],
+  },
+  {
+    id: 'chat',
+    kind: 'chat',
+    title: 'Empfohlen',
+    params: '7B',
+    file: 'Qwen2.5-7B-Instruct-Q4_K_M.gguf',
+    size: 4.68e9,
+    desc: 'Guter Gesprächspartner für Fragen, Ideen, Texte und Erklärungen.',
+    urls: [
+      hf('bartowski/Qwen2.5-7B-Instruct-GGUF', 'Qwen2.5-7B-Instruct-Q4_K_M.gguf'),
+      hf('lmstudio-community/Qwen2.5-7B-Instruct-GGUF', 'Qwen2.5-7B-Instruct-Q4_K_M.gguf'),
+    ],
+  },
+  {
+    id: 'chat-stark',
+    kind: 'chat',
+    title: 'Stark',
+    params: '14B',
+    file: 'Qwen2.5-14B-Instruct-Q4_K_M.gguf',
+    size: 8.99e9,
+    desc: 'Deutlich klüger, braucht aber eine Grafikkarte mit 12 GB oder mehr.',
+    urls: [
+      hf('bartowski/Qwen2.5-14B-Instruct-GGUF', 'Qwen2.5-14B-Instruct-Q4_K_M.gguf'),
+      hf('lmstudio-community/Qwen2.5-14B-Instruct-GGUF', 'Qwen2.5-14B-Instruct-Q4_K_M.gguf'),
+    ],
+  },
 ];
-// Nur für Tests: kleines Modell per Umgebungsvariable einspielen
+// Nur für Tests: kleine Modelle per Umgebungsvariable einspielen
 if (process.env.FORGE_TEST_MODEL) {
-  CATALOG.unshift({ id: 'test', title: 'Test', params: 'tiny', file: 'tiny-test.gguf', size: 84018656, desc: 'Testmodell', urls: [process.env.FORGE_TEST_MODEL] });
+  CATALOG.unshift({ id: 'test', kind: 'code', title: 'Test-Coder', params: 'tiny', file: 'tiny-test.gguf', size: 84018656, desc: 'Testmodell', urls: [process.env.FORGE_TEST_MODEL] });
+  CATALOG.unshift({ id: 'test-chat', kind: 'chat', title: 'Test-Chat', params: 'tiny', file: 'tiny-test-chat.gguf', size: 84018656, desc: 'Testmodell', urls: [process.env.FORGE_TEST_MODEL] });
 }
+
+// Welche Art Modell braucht welcher Bot?
+const BOT_KIND = { chat: 'chat', code: 'code', design: 'code' };
+const BOTS = ['chat', 'code', 'design'];
 
 const GB = 1024 ** 3;
 
@@ -79,6 +128,13 @@ class Engine extends EventEmitter {
     } catch {}
     // Ab 1.4: kleinerer Standard-Kontext ist deutlich schneller (außer der Nutzer hat selbst etwas eingestellt)
     if (!this.config.ctxUserSet) this.config.ctx = 8192;
+    // Ab 1.7: jeder Bot hat sein eigenes Modell
+    const bm = (this.config.botModels = this.config.botModels || {});
+    const legacy = this.config.customPath ? 'custom' : this.config.modelId;
+    if (bm.code === undefined) bm.code = legacy || null;
+    if (bm.design === undefined) bm.design = bm.code;
+    if (bm.chat === undefined) bm.chat = null;
+    if (!BOTS.includes(this.config.activeBot)) this.config.activeBot = legacy ? 'code' : 'chat';
     this.state = { status: 'idle', message: '', error: null, hardware: null, active: null, download: null, loadProgress: 0 };
     this.lib = null;
     this.llama = null;
@@ -135,38 +191,57 @@ class Engine extends EventEmitter {
     }
   }
 
-  recommendedId() {
+  recommendedId(kind = 'code') {
+    if (process.env.FORGE_TEST_MODEL) return kind === 'chat' ? 'test-chat' : 'test';
     const hw = this.state.hardware || {};
     const vram = hw.gpu ? hw.vramGB || 0 : 0;
-    const ram = hw.ramGB || 8;
     // Ohne passende Grafikkarte ist das kleine Modell deutlich flüssiger
-    let id = vram >= 11 ? 'stark' : vram >= 5.5 ? 'standard' : 'leicht';
-    void ram;
+    let level = vram >= 11 ? 2 : vram >= 5.5 ? 1 : 0;
+    const ids = kind === 'chat' ? ['chat-leicht', 'chat', 'chat-stark'] : ['leicht', 'standard', 'stark'];
     const free = this.freeDiskGB();
-    const order = ['leicht', 'standard', 'stark'];
     if (free != null) {
-      while (order.indexOf(id) > 0 && CATALOG.find((c) => c.id === id).size / GB + 1.5 > free) id = order[order.indexOf(id) - 1];
+      while (level > 0 && CATALOG.find((c) => c.id === ids[level]).size / GB + 1.5 > free) level--;
     }
-    return id;
+    return ids[level];
+  }
+
+  // Modell-ID, die ein Bot benutzt (oder 'custom')
+  modelIdForBot(bot) {
+    const id = this.config.botModels[bot];
+    if (id === 'custom' && this.config.customPath && fs.existsSync(this.config.customPath)) return 'custom';
+    if (id && CATALOG.some((c) => c.id === id)) return id;
+    // Noch nichts gewählt: ein passendes, schon vorhandenes Modell oder die Empfehlung
+    const kind = BOT_KIND[bot];
+    const rec = this.recommendedId(kind);
+    const have = CATALOG.find((c) => c.id === rec && this.isInstalled(c)) || CATALOG.find((c) => c.kind === kind && this.isInstalled(c));
+    return have ? have.id : rec;
   }
 
   publicState() {
-    const rec = this.state.hardware ? this.recommendedId() : null;
+    const hw = !!this.state.hardware;
+    const botModels = {};
+    for (const b of BOTS) botModels[b] = hw || this.config.botModels[b] ? this.modelIdForBot(b) : null;
+    const activeId = this.state.active && this.state.active.id;
     return {
       ...this.state,
       modelsDir: this.modelsDir,
       ctx: this.config.ctx,
       freeDiskGB: this.freeDiskGB(),
-      catalog: CATALOG.filter((c) => c.id !== 'test' || process.env.FORGE_TEST_MODEL).map((c) => ({
+      activeBot: this.config.activeBot,
+      botModels,
+      customName: this.config.customPath ? path.basename(this.config.customPath, '.gguf') : null,
+      catalog: CATALOG.map((c) => ({
         id: c.id,
+        kind: c.kind,
         title: c.title,
         params: c.params,
         size: c.size,
         desc: c.desc,
         installed: this.isInstalled(c),
-        active: !this.config.customPath && this.state.active && this.state.active.id === c.id,
-        recommended: c.id === rec,
+        active: activeId === c.id,
+        recommended: hw && c.id === this.recommendedId(c.kind),
         downloading: !!(this.state.download && this.state.download.id === c.id),
+        usedBy: BOTS.filter((b) => botModels[b] === c.id),
       })),
     };
   }
@@ -211,39 +286,52 @@ class Engine extends EventEmitter {
   }
 
   // ---------- Ablauf: alles automatisch ----------
-  async start() {
+  async start(bot) {
+    if (bot && BOTS.includes(bot) && bot !== this.config.activeBot) {
+      this.config.activeBot = bot;
+      this.saveConfig();
+    }
     const run = ++this.runId;
     this.set({ download: null, error: null, errorDetail: null });
     try {
       await this.initLib();
       if (run !== this.runId) return;
+      const activeBot = this.config.activeBot;
+      const id = this.modelIdForBot(activeBot);
+      if (!this.config.botModels[activeBot]) {
+        this.config.botModels[activeBot] = id;
+        this.saveConfig();
+      }
+      // Anderes Modell als das geladene → Wartende sollen auf das neue warten
+      const target = id === 'custom' ? this.config.customPath : this.modelPath(CATALOG.find((c) => c.id === id));
+      if (target !== this.loadedPath && this._readyDone) this._newReady();
       let modelPath;
       let active;
-      if (this.config.customPath && fs.existsSync(this.config.customPath)) {
+      if (id === 'custom') {
         modelPath = this.config.customPath;
-        active = { id: 'custom', title: 'Eigenes Modell', params: path.basename(modelPath, '.gguf') };
+        active = { id: 'custom', title: 'Eigenes Modell', params: path.basename(modelPath, '.gguf'), bot: activeBot };
       } else {
-        this.config.customPath = null;
-        let entry = CATALOG.find((c) => c.id === this.config.modelId);
-        if (!entry) {
-          // Erster Start: nimm ein schon vorhandenes Modell oder wähle passend zur Hardware
-          entry = CATALOG.find((c) => c.id === this.recommendedId() && this.isInstalled(c)) || CATALOG.find((c) => this.isInstalled(c)) || CATALOG.find((c) => c.id === this.recommendedId());
-          if (process.env.FORGE_TEST_MODEL) entry = CATALOG[0];
-          this.config.modelId = entry.id;
-          this.saveConfig();
-        }
+        const entry = CATALOG.find((c) => c.id === id);
         if (!this.isInstalled(entry)) {
           await this.download(entry, run);
           if (run !== this.runId) return;
         }
         modelPath = this.modelPath(entry);
-        active = { id: entry.id, title: entry.title, params: entry.params };
+        active = { id: entry.id, kind: entry.kind, title: entry.title, params: entry.params, bot: activeBot };
+      }
+      // Gleiches Modell schon geladen? Dann nur den Bot umschalten.
+      if (this.model && this.state.status === 'ready' && this.loadedPath === modelPath) {
+        this.set({ active: { ...this.state.active, bot: activeBot } });
+        return;
       }
       await this.load(modelPath, active, run);
+      this.loadedPath = modelPath;
     } catch (err) {
       if (run !== this.runId) return;
       if (err.name === 'AbortError' || err.code === 'ABORT_ERR') {
         this.set({ status: 'idle', message: 'Download abgebrochen.', download: null });
+        this._rejectReady(new Error('Download abgebrochen.'));
+        this._newReady();
         return;
       }
       this.log('error', 'Start fehlgeschlagen: ' + (err && err.stack ? err.stack : err));
@@ -253,21 +341,38 @@ class Engine extends EventEmitter {
     }
   }
 
-  async select(id) {
-    this.cancelDownload();
-    this.config.modelId = id;
-    this.config.customPath = null;
-    this.saveConfig();
-    await this.unload();
-    this.start();
+  // Ist für diesen Bot schon das richtige Modell geladen?
+  isReadyFor(bot) {
+    if (this.state.status !== 'ready' || !this.session) return false;
+    const id = this.modelIdForBot(bot);
+    const want = id === 'custom' ? this.config.customPath : this.modelPath(CATALOG.find((c) => c.id === id));
+    return want === this.loadedPath;
   }
 
-  async useCustom(p) {
+  // Für einen Bot ein Modell festlegen (lädt es bei Bedarf herunter, wenn der Bot gerade aktiv ist)
+  async setBotModel(bot, id) {
+    if (!BOTS.includes(bot)) return false;
+    this.config.botModels[bot] = id;
+    this.saveConfig();
+    if (bot === this.config.activeBot || this.state.status === 'idle' || this.state.status === 'error') {
+      this.cancelDownload();
+      this.start(bot);
+    } else this.set({});
+    return true;
+  }
+
+  // Alt (vor 1.7): Modell für den Coder
+  async select(id) {
+    return this.setBotModel('code', id);
+  }
+
+  async useCustom(p, forBot) {
     this.cancelDownload();
     this.config.customPath = p;
+    const bot = BOTS.includes(forBot) ? forBot : this.config.activeBot;
+    this.config.botModels[bot] = 'custom';
     this.saveConfig();
-    await this.unload();
-    this.start();
+    this.start(bot);
   }
 
   async setCtx(n) {
@@ -281,7 +386,7 @@ class Engine extends EventEmitter {
   deleteModel(id) {
     const entry = CATALOG.find((c) => c.id === id);
     if (!entry) return false;
-    if (this.state.active && this.state.active.id === id && this.state.status !== 'error') return false;
+    if (this.loadedPath === this.modelPath(entry) || (this.state.download && this.state.download.id === id)) return false;
     fs.rmSync(this.modelPath(entry), { force: true });
     fs.rmSync(this.modelPath(entry) + '.part', { force: true });
     this.set({});
@@ -401,6 +506,7 @@ class Engine extends EventEmitter {
       if (this.model) await this.model.dispose();
     } catch {}
     this.session = this.context = this.model = null;
+    this.loadedPath = null;
     this.grammarCache.clear();
   }
 
@@ -523,12 +629,26 @@ class Engine extends EventEmitter {
     return job;
   }
 
-  async _chat({ messages, temperature = 0.3, schema, gbnf, maxTokens }, onText, signal) {
+  async _chat({ messages, temperature = 0.3, schema, gbnf, maxTokens, bot }, onText, signal) {
+    // Anderer Bot mit anderem Modell? Dann zuerst umschalten (ggf. mit Download).
+    if (bot && BOTS.includes(bot)) {
+      const aborted = new Promise((r) => signal.addEventListener('abort', r, { once: true }));
+      for (let i = 0; i < 4 && !this.isReadyFor(bot); i++) {
+        if (this.state.status === 'error' && i > 0) throw new Error(this.state.error || 'Die KI konnte nicht starten.');
+        onText(null, { waiting: true, switching: bot });
+        if (this.config.activeBot !== bot || !['detecting', 'downloading', 'loading'].includes(this.state.status)) this.start(bot);
+        await new Promise((r) => setTimeout(r, 60));
+        await Promise.race([this.ready, aborted]);
+        if (signal.aborted) return { aborted: true };
+      }
+      if (this.isReadyFor(bot)) this.config.activeBot = bot;
+    }
     if (this.state.status !== 'ready' || !this.session) {
       if (this.state.status === 'error') throw new Error(this.state.error || 'Die KI konnte nicht starten.');
       if (!['detecting', 'downloading', 'loading'].includes(this.state.status)) throw new Error('NO_MODEL: Es ist noch kein KI-Modell geladen. Wähle eins unter „Modelle“.');
       onText(null, { waiting: true });
-      await this.ready;
+      await Promise.race([this.ready, new Promise((r) => signal.addEventListener('abort', r, { once: true }))]);
+      if (signal.aborted) return { aborted: true };
     }
     if (signal.aborted) return { aborted: true };
     const toItem = (m) =>

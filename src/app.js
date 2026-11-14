@@ -1,7 +1,7 @@
 // FORGE AI – Oberfläche
 import { Marked } from 'marked';
 import hljs from 'highlight.js/lib/common';
-import { codeSystemPrompt, model3dSystemPrompt, MODEL_GRAMMAR, DETAIL_LEVELS, DETAIL_TOKENS, parseModelText, modelToText } from './prompts.js';
+import { BOTS, systemPromptFor, model3dSystemPrompt, MODEL_GRAMMAR, DETAIL_LEVELS, DETAIL_TOKENS, parseModelText, modelToText } from './prompts.js';
 import { Viewer3D, extractJson, normalizeModel } from './viewer3d.js';
 
 const forge = window.forge;
@@ -91,6 +91,13 @@ md.use({
     code({ text, lang }) {
       const raw = String(lang || '').trim();
       let l = raw.split(/[\s:{]/)[0].toLowerCase();
+      if (l === 'forge3d' || (/^name\s*:/i.test(text.trim()) && /\|\s*#[0-9a-f]{3,6}\s*\|/i.test(text))) {
+        const m = parseModelText(text);
+        const sw = m.parts.slice(0, 8).map((p) => `<i style="background:${esc(p.color)}"></i>`).join('');
+        return `<div class="model-card"><div class="mc-icon">◆</div><div class="mc-info"><b>${esc(m.name)}</b><span>${m.parts.length} Teile <span class="mc-sw">${sw}</span></span></div>
+<div class="mc-actions"><button class="btn sm primary" data-act="open3d">In 3D öffnen</button><button class="btn sm ghost" data-act="copy">${I.copy}</button></div>
+<pre hidden><code>${esc(text)}</code></pre></div>`;
+      }
       const fileHint = (raw.match(/([\w\-./\\]+\.[a-z0-9]{1,8})/i) || [])[1] || '';
       let html;
       try {
@@ -140,7 +147,7 @@ const fmtSize = (b) => (b >= 1e9 ? (b / 1e9).toFixed(1).replace('.', ',') + ' GB
 const gpuLabel = (hw) => (!hw ? '' : !hw.gpu ? 'CPU' : { vulkan: 'Grafikkarte', cuda: 'CUDA', metal: 'Metal' }[hw.gpu] || hw.gpu);
 const activeLabel = () => {
   const a = S.engine && S.engine.active;
-  return a ? `${a.title} · ${a.params}` : '– kein Modell –';
+  return a ? `${a.kind === 'chat' ? 'Chat' : a.id === 'custom' ? 'Eigenes' : 'Coder'} ${a.title} · ${a.params}` : '– kein Modell –';
 };
 const dlPct = (d) => (d && d.total ? Math.floor((d.received / d.total) * 100) : 0);
 
@@ -149,6 +156,7 @@ function onEngine(st) {
   if (st.notice && (!S.engine || S.engine.notice !== st.notice)) toast(st.notice, 'err');
   if (st.memNote && st.status === 'ready' && (!S.engine || S.engine.memNote !== st.memNote)) toast(st.memNote);
   S.engine = st;
+  if (S.waitingAi && S.waitingAi.m.waiting) fillAi(S.waitingAi.el, S.waitingAi.m, false, true);
   renderStatus();
   updateModelLabels();
   renderEngineOverlay();
@@ -156,7 +164,8 @@ function onEngine(st) {
     toast(`${S.settings.aiName} ist bereit!`, 'ok');
   }
   if (st.status === 'ready' && !wasReady) {
-    forge.engine.preload([{ role: 'system', content: codeSystemPrompt(S.settings.aiName) }]).catch(() => {});
+    const ab = BOTS[st.activeBot] ? st.activeBot : 'code';
+    forge.engine.preload([{ role: 'system', content: systemPromptFor(ab, S.settings.aiName) }]).catch(() => {});
   }
 }
 
@@ -170,7 +179,7 @@ function renderStatus() {
       el.classList.add('on');
       const share = st.active.gpuShare;
       const where = st.hardware && st.hardware.gpu && share != null && share < 100 ? (share === 0 ? 'RAM' : `Grafikkarte ${share} %`) : gpuLabel(st.hardware);
-      text = `Bereit · ${st.active.params} · ${where}`;
+      text = `Bereit · ${(BOTS[st.active.bot] || BOTS.code).name} ${st.active.params} · ${where}`;
       break;
     }
     case 'downloading':
@@ -208,30 +217,76 @@ function updateModelLabels() {
 // ======================================================================
 //                               CODE-MODUS
 // ======================================================================
-const SUGGESTIONS = [
-  ['Snake-Spiel bauen', 'Ein komplettes Snake-Spiel als einzelne HTML-Datei mit Highscore und Neon-Look.'],
-  ['Minecraft Fabric-Mod', 'Erklär mir Schritt für Schritt, wie ich in einer Fabric-Mod für Minecraft ein eigenes Schwert-Item hinzufüge, mit vollständigem Code.'],
-  ['Python-Tool', 'Schreib ein Python-Skript, das meinen Downloads-Ordner automatisch nach Dateitypen in Unterordner sortiert.'],
-  ['Code erklären & fixen', 'Ich schicke dir gleich Code. Finde die Fehler, erklär sie kurz und gib mir die korrigierte Version.'],
-];
+const botOf = (conv) => (conv && BOTS[conv.bot] ? conv.bot : S.newBot || 'chat');
+S.newBot = BOTS[S.settings.lastBot] ? S.settings.lastBot : 'chat';
 
 function renderSuggestions() {
-  $('#suggestions').innerHTML = SUGGESTIONS.map(
-    ([t, p], i) => `<div class="sugg" data-i="${i}"><b>${esc(t)}</b><span>${esc(p.length > 82 ? p.slice(0, 80) + '…' : p)}</span></div>`
-  ).join('');
-  $$('.sugg').forEach((el) =>
-    el.addEventListener('click', () => {
-      $('#input').value = SUGGESTIONS[+el.dataset.i][1];
-      autosize();
-      sendMessage();
-    })
-  );
+  const bot = BOTS[botOf(currentConv())];
+  $('#botPicker').innerHTML = Object.values(BOTS)
+    .map(
+      (b) => `<button class="bot-card ${b.id === bot.id ? 'active' : ''}" data-bot="${b.id}" style="--bot:${b.color}">
+        <span class="bot-ic">${b.icon}</span><b>${esc(b.name)}</b><span>${esc(b.desc)}</span></button>`
+    )
+    .join('');
+  $('#suggestions').innerHTML = bot.suggestions
+    .map(([t, p], i) => `<div class="sugg" data-i="${i}" style="--bot:${bot.color}"><b>${esc(t)}</b><span>${esc(p.length > 82 ? p.slice(0, 80) + '…' : p)}</span></div>`)
+    .join('');
+  $('#heroSub').textContent = `${bot.name}: ${bot.desc}. Läuft komplett auf deinem PC.`;
 }
+$('#suggestions').addEventListener('click', (e) => {
+  const el = e.target.closest('.sugg');
+  if (!el) return;
+  $('#input').value = BOTS[botOf(currentConv())].suggestions[+el.dataset.i][1];
+  autosize();
+  sendMessage();
+});
+$('#botPicker').addEventListener('click', (e) => {
+  const b = e.target.closest('.bot-card');
+  if (b) setBot(b.dataset.bot);
+});
+
+// Bot für den aktuellen (oder neuen) Chat wählen
+function setBot(id) {
+  if (!BOTS[id]) return;
+  const conv = currentConv();
+  if (conv) {
+    conv.bot = id;
+    saveConvs();
+  }
+  S.newBot = id;
+  S.settings.lastBot = id;
+  saveSettings();
+  renderSuggestions();
+  renderBotChip();
+  renderSideList();
+  $('#input').placeholder = `Schreib dem ${BOTS[id].name} … (Enter = senden, Shift+Enter = neue Zeile)`;
+  $('#input').focus();
+}
+
+function renderBotChip() {
+  const b = BOTS[botOf(currentConv())];
+  $('#botChip').innerHTML = `<span class="bot-dot" style="background:${b.color}"></span>${esc(b.name)}<svg viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg>`;
+  $('#botMenu').innerHTML = Object.values(BOTS)
+    .map((x) => `<button data-bot="${x.id}" class="${x.id === b.id ? 'active' : ''}"><span class="bot-dot" style="background:${x.color}"></span><b>${esc(x.name)}</b><span>${esc(x.desc)}</span></button>`)
+    .join('');
+  document.documentElement.style.setProperty('--bot-color', b.color);
+}
+$('#botChip').addEventListener('click', (e) => {
+  e.stopPropagation();
+  $('#botMenu').hidden = !$('#botMenu').hidden;
+});
+$('#botMenu').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-bot]');
+  if (!b) return;
+  $('#botMenu').hidden = true;
+  setBot(b.dataset.bot);
+});
+document.addEventListener('click', () => ($('#botMenu').hidden = true));
 
 const currentConv = () => S.convs.find((c) => c.id === S.convId) || null;
 
 function newConv() {
-  const c = { id: uid(), title: 'Neuer Chat', messages: [], updated: Date.now() };
+  const c = { id: uid(), title: 'Neuer Chat', messages: [], updated: Date.now(), bot: S.newBot || 'chat' };
   S.convs.unshift(c);
   S.convId = c.id;
   return c;
@@ -255,7 +310,7 @@ function renderSideList() {
     }
     list.innerHTML = S.convs
       .map(
-        (c) => `<div class="side-item ${c.id === S.convId ? 'active' : ''}" data-id="${c.id}">${I.chat}<span class="t">${esc(c.title)}</span><button class="del" title="Löschen">${I.trash}</button></div>`
+        (c) => `<div class="side-item ${c.id === S.convId ? 'active' : ''}" data-id="${c.id}" title="${esc(BOTS[c.bot || 'code'].name)}"><span class="bot-dot" style="background:${BOTS[c.bot || 'code'].color}"></span><span class="t">${esc(c.title)}</span><button class="del" title="Löschen">${I.trash}</button></div>`
       )
       .join('');
   } else {
@@ -302,6 +357,11 @@ function renderConversation() {
   box.innerHTML = '';
   $('#welcome').hidden = !!(conv && conv.messages.length);
   $('#chatTitle').textContent = conv ? conv.title : 'Neuer Chat';
+  if (conv && !conv.bot) conv.bot = 'code'; // Chats aus älteren Versionen gehörten zum Coder
+  if (conv && conv.bot) S.newBot = conv.bot;
+  renderBotChip();
+  renderSuggestions();
+  $('#input').placeholder = `Schreib dem ${BOTS[botOf(conv)].name} … (Enter = senden, Shift+Enter = neue Zeile)`;
   if (!conv) return;
   conv.messages.forEach((m, i) => box.appendChild(m.role === 'user' ? userEl(m) : aiEl(m, i === conv.messages.length - 1)));
   scrollBottom(true);
@@ -318,7 +378,8 @@ function userEl(m) {
 function aiEl(m, isLast) {
   const d = document.createElement('div');
   d.className = 'msg ai';
-  d.innerHTML = `<div class="avatar">${esc((S.settings.aiName || 'F')[0].toUpperCase())}</div><div class="body"></div>`;
+  const b = BOTS[m.bot] || BOTS[botOf(currentConv())];
+  d.innerHTML = `<div class="avatar" style="background:${b.color}" title="${esc(b.name)}">${b.icon}</div><div class="body"></div>`;
   fillAi(d, m, true, isLast);
   return d;
 }
@@ -328,7 +389,7 @@ function fillAi(el, m, final, isLast) {
   let html = '';
   if (m.thinking) html += `<details class="think"><summary>Gedankengang</summary><div>${esc(m.thinking)}</div></details>`;
   if (m.content) html += `<div class="md ${final ? '' : 'cursor'}">${md.parse(m.content)}</div>`;
-  else if (!final && m.waiting) html += `<div class="waiting"><span class="spinner"></span>Deine KI startet noch … gleich geht's los.</div>`;
+  else if (!final && m.waiting) html += `<div class="waiting"><span class="spinner"></span>${esc(waitingText(m))}</div>`;
   else if (!final) html += `<div class="typing"><i></i><i></i><i></i></div>`;
   if (m.error) {
     html += `<div class="err-box">${esc(m.error.replace('NO_MODEL: ', ''))}<div><button class="btn sm" data-act="setup">KI-Modelle öffnen</button></div></div>`;
@@ -342,6 +403,15 @@ function fillAi(el, m, final, isLast) {
   }
   body.innerHTML = html;
   decorateCodeblocks(body);
+}
+
+function waitingText(m) {
+  const st = S.engine || {};
+  const b = BOTS[m.bot] || BOTS.chat;
+  if (st.status === 'downloading' && st.download) return `Der ${b.name} braucht sein eigenes Modell – lade ${st.download.title} (${st.download.params}) herunter … ${dlPct(st.download)} % (nur einmal nötig)`;
+  if (st.status === 'loading') return `Wechsle zum ${b.name}-Modell … ${st.loadProgress || 0} %`;
+  if (m.switching) return `Wechsle zum ${b.name} …`;
+  return "Deine KI startet noch … gleich geht's los.";
 }
 
 let renderPending = false;
@@ -420,7 +490,9 @@ async function sendMessage(regenerate = false) {
   conv.updated = Date.now();
   S.convs = [conv, ...S.convs.filter((c) => c.id !== conv.id)];
 
-  const ai = { role: 'assistant', content: '', model: activeLabel() };
+  const bot = botOf(conv);
+  conv.bot = bot;
+  const ai = { role: 'assistant', content: '', model: activeLabel(), bot };
   conv.messages.push(ai);
   renderConversation();
   renderSideList();
@@ -428,15 +500,20 @@ async function sendMessage(regenerate = false) {
   scrollBottom(true);
 
   const req = {
-    messages: [{ role: 'system', content: codeSystemPrompt(S.settings.aiName) }, ...conv.messages.slice(0, -1).map(toPlain)],
-    temperature: +S.settings.temperature,
+    messages: [{ role: 'system', content: systemPromptFor(bot, S.settings.aiName) }, ...conv.messages.slice(0, -1).map(toPlain)],
+    temperature: bot === 'chat' ? Math.max(0.6, +S.settings.temperature) : +S.settings.temperature,
+    bot,
   };
+  S.waitingAi = { el, m: ai };
   setBusy(true);
   const id = uid();
   S.streamId = id;
   try {
     const res = await forge.chat(id, req, (d) => {
-      if (d.waiting) ai.waiting = true;
+      if (d.waiting) {
+        ai.waiting = true;
+        if (d.switching) ai.switching = d.switching;
+      }
       if (d.text) {
         ai.waiting = false;
         ai.content += d.text;
@@ -450,6 +527,8 @@ async function sendMessage(regenerate = false) {
     ai.error = err.message;
   } finally {
     delete ai.waiting;
+    delete ai.switching;
+    S.waitingAi = null;
     finished.add(ai);
     S.streamId = null;
     setBusy(false);
@@ -475,7 +554,7 @@ $('#messages').addEventListener('click', async (e) => {
     if (m) await copyText(m.content);
     return flash(btn);
   }
-  const cb = btn.closest('.codeblock');
+  const cb = btn.closest('.codeblock') || btn.closest('.model-card');
   if (!cb) return;
   const code = $('code', cb).textContent;
   if (act === 'copy') {
@@ -487,6 +566,16 @@ $('#messages').addEventListener('click', async (e) => {
     const r = await forge.saveFile({ name, data: code });
     if (r.ok) toast('Gespeichert: ' + r.path, 'ok');
     else if (r.error) toast(r.error, 'err');
+  } else if (act === 'open3d') {
+    try {
+      const m = normalizeModel(parseModelText(code));
+      setMode('3d');
+      showModel(m);
+      saveToLibrary(m, '(aus dem Chat)');
+      toast(`„${m.name}“ im 3D-Modus geöffnet`, 'ok');
+    } catch (err) {
+      toast('Modell konnte nicht geöffnet werden: ' + err.message, 'err');
+    }
   } else if (act === 'preview') {
     let html = code;
     if (cb.dataset.lang === 'svg' || (/^\s*<svg/i.test(code) && !/<html/i.test(code))) {
@@ -848,6 +937,7 @@ async function generate3D(editInstruction) {
         temperature: 0.45,
         gbnf: MODEL_GRAMMAR,
         maxTokens,
+        bot: 'design',
       },
       (d) => {
         if (d.waiting) $('#genText').textContent = 'KI startet noch …';
@@ -1026,51 +1116,69 @@ function renderModels() {
   const st = S.engine;
   if (!st) return;
   const hw = st.hardware;
+  const tab = BOTS[S.modelsTab] ? S.modelsTab : BOTS[st.activeBot] ? st.activeBot : 'chat';
+  S.modelsTab = tab;
+  const kind = tab === 'chat' ? 'chat' : 'code';
+  const current = st.botModels ? st.botModels[tab] : null;
+  const tabs = Object.values(BOTS)
+    .map((b) => {
+      const mid = st.botModels && st.botModels[b.id];
+      const e = st.catalog.find((c) => c.id === mid);
+      const sub = mid === 'custom' ? 'Eigenes Modell' : e ? `${e.title} · ${e.params}${e.installed ? '' : ' (noch nicht geladen)'}` : '–';
+      return `<button class="bot-tab ${b.id === tab ? 'active' : ''}" data-a="tab" data-id="${b.id}" style="--bot:${b.color}"><span class="bot-ic">${b.icon}</span><b>${esc(b.name)}</b><span>${esc(sub)}</span></button>`;
+    })
+    .join('');
   const cards = st.catalog
+    .filter((c) => c.kind === kind)
     .map((c) => {
       let actions;
+      const isCurrent = c.id === current;
       if (c.downloading) {
         const d = st.download;
         actions = `<div class="progress"><div style="width:${dlPct(d)}%"></div></div>
           <div class="pstat"><span>${fmtSize(d.received)} / ${fmtSize(d.total)}</span><span>${etaText(d)}</span></div>
           <button class="btn sm" data-a="cancel">Abbrechen</button>`;
-      } else if (c.active) {
-        actions = `<button class="btn sm" disabled>${st.status === 'ready' ? 'Aktiv' : 'Startet …'}</button>`;
+      } else if (isCurrent) {
+        actions = `<button class="btn sm" disabled>${c.active ? 'Läuft gerade' : c.installed ? 'Ausgewählt' : 'Ausgewählt – lädt beim ersten Benutzen'}</button>`;
       } else if (c.installed) {
-        actions = `<div class="row-btns"><button class="btn sm primary" data-a="use" data-id="${c.id}">Verwenden</button><button class="btn sm ghost" data-a="del" data-id="${c.id}" title="Vom PC löschen">${I.trash}</button></div>`;
+        actions = `<div class="row-btns"><button class="btn sm primary" data-a="use" data-id="${c.id}">Für ${esc(BOTS[tab].name)} verwenden</button>${
+          c.active || c.usedBy.length ? '' : `<button class="btn sm ghost" data-a="del" data-id="${c.id}" title="Vom PC löschen">${I.trash}</button>`
+        }</div>`;
       } else {
         actions = `<button class="btn sm" data-a="use" data-id="${c.id}">${I.save} Herunterladen &amp; verwenden</button>`;
       }
-      return `<div class="mcard ${c.recommended ? 'rec' : ''} ${c.active ? 'act' : ''}">
-        ${c.active ? '<span class="tag on">Aktiv</span>' : c.recommended ? '<span class="tag">Passt zu deinem PC</span>' : ''}
+      const used = c.usedBy.filter((b) => b !== tab).map((b) => BOTS[b].name);
+      return `<div class="mcard ${c.recommended ? 'rec' : ''} ${isCurrent ? 'act' : ''}">
+        ${isCurrent ? '<span class="tag on">Ausgewählt</span>' : c.recommended ? '<span class="tag">Passt zu deinem PC</span>' : ''}
         <div class="title">${esc(c.title)} <span class="muted">· ${esc(c.params)}</span></div>
-        <div class="id">${fmtSize(c.size)}${c.installed ? ' · auf deinem PC' : ''}</div>
+        <div class="id">${fmtSize(c.size)}${c.installed ? ' · auf deinem PC' : ''}${used.length ? ' · auch für ' + esc(used.join(', ')) : ''}</div>
         <div class="req">${esc(c.desc)}</div>
         ${actions}
       </div>`;
     })
     .join('');
-  const custom = st.active && st.active.id === 'custom';
   $('#setupBody').innerHTML = `
-    <h2>KI-Modelle</h2>
-    <p>${hw ? hwLine(hw) : ''}${st.freeDiskGB != null ? ` · ${String(Math.round(st.freeDiskGB)).replace('.', ',')} GB frei` : ''}</p>
+    <h2>Bots &amp; KI-Modelle</h2>
+    <p>${hw ? hwLine(hw) : ''}${st.freeDiskGB != null ? ` · ${String(Math.round(st.freeDiskGB))} GB frei` : ''}</p>
+    <div class="bot-tabs">${tabs}</div>
     ${st.status === 'idle' && !st.active ? '<div class="notice">Wähle ein Modell, damit deine KI starten kann.</div>' : ''}
-    ${custom ? `<div class="notice">Aktiv: eigenes Modell <b>${esc(st.active.params)}</b></div>` : ''}
+    ${current === 'custom' ? `<div class="notice">Der ${esc(BOTS[tab].name)} benutzt dein eigenes Modell <b>${esc(st.customName || '')}</b>.</div>` : ''}
     ${st.notice ? `<div class="notice">${esc(st.notice)}</div>` : ''}
     ${st.memNote ? `<div class="notice">${esc(st.memNote)}</div>` : ''}
-    ${st.status === 'ready' ? `<div class="notice small">⚡ Läuft auf: <b>${st.hardware && st.hardware.gpu ? 'Grafikkarte' : 'Prozessor (langsamer)'}</b>${S.lastTps ? ` · zuletzt <b>${S.lastTps.toFixed(1).replace('.', ',')} Token/s</b>` : ''}. Kleinere Modelle sind schneller, größere klüger.</div>` : ''}
+    ${st.status === 'ready' ? `<div class="notice small">⚡ Gerade geladen: <b>${esc(activeLabel())}</b> auf ${st.hardware && st.hardware.gpu ? 'der Grafikkarte' : 'dem Prozessor'}${S.lastTps ? ` · zuletzt <b>${S.lastTps.toFixed(1).replace('.', ',')} Token/s</b>` : ''}. Es passt immer nur ein Modell gleichzeitig auf die Grafikkarte – beim Bot-Wechsel tauscht FORGE es automatisch.</div>` : ''}
     <div class="model-cards">${cards}</div>
     <div class="actions between">
-      <div style="display:flex;gap:8px">
-        <button class="btn sm ghost" data-a="custom">Eigene GGUF-Datei laden</button>
-        <button class="btn sm ghost" data-a="folder">Modell-Ordner öffnen</button>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn sm ghost" data-a="custom">Eigene GGUF-Datei für ${esc(BOTS[tab].name)}</button>
+        <button class="btn sm ghost" data-a="folder">Modell-Ordner</button>
         <button class="btn sm ghost" data-a="copylog">Fehlerbericht kopieren</button>
       </div>
       ${st.active || st.status === 'downloading' || st.status === 'loading' ? '<button class="btn" data-a="close">Schließen</button>' : ''}
     </div>`;
 }
 
-function openModels() {
+function openModels(tab) {
+  if (tab) S.modelsTab = tab;
   S.modelsOpen = true;
   renderEngineOverlay();
 }
@@ -1094,13 +1202,17 @@ $('#setupBody').addEventListener('click', async (e) => {
   } else if (a === 'openlog') forge.openLog();
   else if (a === 'cancel') forge.engine.cancel();
   else if (a === 'folder') forge.engine.openFolder();
-  else if (a === 'custom') {
-    if (await forge.engine.custom()) closeModels();
+  else if (a === 'tab') {
+    S.modelsTab = id;
+    renderModels();
+  } else if (a === 'custom') {
+    if (await forge.engine.custom(S.modelsTab)) closeModels();
   } else if (a === 'use') {
-    const entry = S.engine.catalog.find((c) => c.id === id);
-    S.modelsOpen = false;
-    if (entry && !entry.installed) S.setupShown = true;
-    forge.engine.select(id);
+    const bot = S.modelsTab || 'chat';
+    await forge.engine.setBotModel(bot, id);
+    toast(`${BOTS[bot].name} benutzt jetzt ${S.engine.catalog.find((c) => c.id === id)?.title || id}`, 'ok');
+    S.engine = await forge.engine.state();
+    renderModels();
   } else if (a === 'del') {
     if (b.dataset.confirm) {
       if (await forge.engine.remove(id)) toast('Modell gelöscht', 'ok');

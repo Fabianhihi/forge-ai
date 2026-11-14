@@ -53,14 +53,18 @@
     <!-- ================= CODE ================= -->
     <section id="codeView" class="view active">
       <header class="topbar">
-        <div id="chatTitle">Neuer Chat</div>
+        <div class="tb-left">
+          <div class="bot-switch"><button id="botChip" class="bot-chip" title="Bot wechseln"></button><div id="botMenu" class="bot-menu" hidden></div></div>
+          <div id="chatTitle">Neuer Chat</div>
+        </div>
         <div class="chip" id="codeModelChip" title="Aktives Modell (in den Einstellungen änderbar)"></div>
       </header>
 
       <div id="scroller">
         <div id="welcome">
           <div class="hero-name" id="heroName">FORGE</div>
-          <p class="hero-sub">Deine eigene KI. Läuft komplett auf deinem PC, ohne Cloud, ohne API-Key.</p>
+          <p class="hero-sub" id="heroSub">Deine eigene KI. Läuft komplett auf deinem PC, ohne Cloud, ohne API-Key.</p>
+          <div class="bot-picker" id="botPicker"></div>
           <div class="suggestions" id="suggestions"></div>
         </div>
         <div id="messages"></div>

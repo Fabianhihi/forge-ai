@@ -54,7 +54,8 @@ contextBridge.exposeInMainWorld('forge', {
     remove: (id) => ipcRenderer.invoke('engine:delete', id),
     setCtx: (n) => ipcRenderer.invoke('engine:setCtx', n),
     openFolder: () => ipcRenderer.invoke('engine:openFolder'),
-    custom: () => ipcRenderer.invoke('engine:custom'),
+    custom: (bot) => ipcRenderer.invoke('engine:custom', bot),
+    setBotModel: (bot, id) => ipcRenderer.invoke('engine:setBotModel', bot, id),
   },
   update: {
     state: () => ipcRenderer.invoke('update:state'),

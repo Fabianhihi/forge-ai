@@ -260,6 +260,7 @@ app.on('before-quit', () => {
 // ---------- KI-Motor: Befehle aus der Oberfläche ----------
 ipcMain.handle('engine:state', () => lastState);
 ipcMain.handle('engine:select', (_e, id) => call('select', String(id)));
+ipcMain.handle('engine:setBotModel', (_e, bot, id) => call('setBotModel', String(bot), String(id)));
 ipcMain.handle('engine:retry', () => {
   if (crashes > 3 || !worker) {
     crashes = 0;
@@ -274,14 +275,14 @@ ipcMain.handle('engine:preload', (_e, messages) => (workerReady ? call('preload'
 ipcMain.handle('engine:delete', (_e, id) => call('deleteModel', String(id)));
 ipcMain.handle('engine:setCtx', (_e, n) => call('setCtx', Math.max(4096, Math.min(131072, Number(n) || 16384))));
 ipcMain.handle('engine:openFolder', () => shell.openPath(path.join(app.getPath('userData'), 'models')));
-ipcMain.handle('engine:custom', async () => {
+ipcMain.handle('engine:custom', async (_e, bot) => {
   const { canceled, filePaths } = await dialog.showOpenDialog(win, {
     title: 'Eigenes KI-Modell (GGUF) wählen',
     filters: [{ name: 'GGUF-Modell', extensions: ['gguf'] }],
     properties: ['openFile'],
   });
   if (canceled || !filePaths[0]) return false;
-  call('useCustom', filePaths[0]);
+  call('useCustom', filePaths[0], bot || null);
   return true;
 });
 ipcMain.handle('log:copy', () => {

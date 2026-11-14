@@ -13,6 +13,79 @@ Regeln:
 - Wenn du dir bei etwas unsicher bist, sag es ehrlich.`;
 }
 
+// ---------- Die drei Bots ----------
+export const BOTS = {
+  chat: {
+    id: 'chat',
+    name: 'Allrounder',
+    icon: '💬',
+    color: '#4ea8ff',
+    desc: 'Quatschen, Fragen, Ideen, Texte, Schule',
+    suggestions: [
+      ['Erklär mir was', 'Erklär mir einfach, wie ein schwarzes Loch entsteht.'],
+      ['Ideen sammeln', 'Gib mir 10 kreative Ideen für ein eigenes Minecraft-Abenteuer mit Freunden.'],
+      ['Text schreiben', 'Schreib mir eine kurze, witzige Geschichte über einen Roboter, der Angst vor Wasser hat.'],
+      ['Lernen', 'Frag mich 5 Quizfragen zu Erdkunde und sag mir danach, wie gut ich war.'],
+    ],
+  },
+  code: {
+    id: 'code',
+    name: 'Coder',
+    icon: '⌨',
+    color: '#ff7a1a',
+    desc: 'Programmieren, Mods, Spiele, Fehler finden',
+    suggestions: [
+      ['Snake-Spiel bauen', 'Ein komplettes Snake-Spiel als einzelne HTML-Datei mit Highscore und Neon-Look.'],
+      ['Minecraft Fabric-Mod', 'Erklär mir Schritt für Schritt, wie ich in einer Fabric-Mod für Minecraft ein eigenes Schwert-Item hinzufüge, mit vollständigem Code.'],
+      ['Python-Tool', 'Schreib ein Python-Skript, das meinen Downloads-Ordner automatisch nach Dateitypen in Unterordner sortiert.'],
+      ['Code erklären & fixen', 'Ich schicke dir gleich Code. Finde die Fehler, erklär sie kurz und gib mir die korrigierte Version.'],
+    ],
+  },
+  design: {
+    id: 'design',
+    name: '3D-Designer',
+    icon: '◆',
+    color: '#a78bfa',
+    desc: '3D-Modelle im Chat bauen & Design-Tipps',
+    suggestions: [
+      ['Mech bauen', 'Bau mir einen coolen Kampf-Mech mit zwei Schulterkanonen.'],
+      ['Burg entwerfen', 'Entwirf eine kleine mittelalterliche Burg mit Türmen und Tor.'],
+      ['Design-Tipps', 'Wie sorge ich dafür, dass meine Low-Poly-Modelle professionell aussehen?'],
+      ['Raumschiff', 'Bau ein schnittiges Raumschiff mit leuchtenden Triebwerken.'],
+    ],
+  },
+};
+
+export function chatSystemPrompt(name) {
+  return `Du bist ${name}, eine freundliche KI, die komplett lokal und offline auf dem PC des Nutzers läuft. Du bist ein Allrounder: Du beantwortest Fragen, erklärst Dinge verständlich, hilfst bei Ideen, Texten, Schule und Alltag.
+
+Regeln:
+- Antworte in der Sprache des Nutzers (meistens Deutsch), locker, freundlich und auf den Punkt.
+- Erkläre so, dass man es leicht versteht. Listen nur, wenn sie wirklich helfen.
+- Wenn du dir bei etwas nicht sicher bist, sag es ehrlich, statt etwas zu erfinden.
+- Kleine Code-Beispiele sind okay. Für größere Programmier-Projekte empfiehl den Coder-Bot von FORGE, für 3D-Modelle den 3D-Designer.`;
+}
+
+export function designSystemPrompt(name) {
+  return `Du bist ${name} im Modus 3D-Designer. Du hilfst beim Entwerfen von 3D-Modellen und gibst Design-Tipps (Formen, Proportionen, Farben, Low-Poly, Blender, Blockbench, Minecraft-Modelle).
+
+Wenn der Nutzer ein Modell gebaut haben will: Schreib 1–2 kurze Sätze zu deinem Entwurf und gib dann das Modell in EINEM Codeblock mit der Sprache forge3d aus, also so:
+\`\`\`forge3d
+name: ...
+box | ... | ... | ... | ... | #rrggbb | material
+\`\`\`
+Danach kann der Nutzer das Modell mit einem Klick in 3D ansehen und exportieren. Bei Änderungswünschen gibst du das KOMPLETTE geänderte Modell wieder als forge3d-Block aus.
+Bei reinen Fragen (Tipps, Erklärungen) antwortest du normal ohne Codeblock. Antworte in der Sprache des Nutzers.
+
+${FORGE3D_RULES}`;
+}
+
+export function systemPromptFor(bot, name) {
+  if (bot === 'chat') return chatSystemPrompt(name);
+  if (bot === 'design') return designSystemPrompt(name);
+  return codeSystemPrompt(name);
+}
+
 export const SHAPES = ['box', 'sphere', 'cylinder', 'cone', 'torus', 'capsule', 'wedge', 'lathe', 'extrude'];
 export const MATERIALS = ['matte', 'plastic', 'metal', 'glass', 'glow', 'wood', 'stone'];
 
@@ -57,10 +130,7 @@ const EXAMPLE = {
   ],
 };
 
-export function model3dSystemPrompt() {
-  return `Du bist ein 3D-Modellierer. Du baust 3D-Modelle aus Grundformen. Antworte NUR im FORGE-Format: erst eine Namenszeile, dann genau eine Zeile pro Teil.
-
-FORMAT
+const FORGE3D_RULES = `FORMAT
 name: <Name des Modells>
 <form> | <teilname> | <größe> | <x y z> | <drehung x y z> | <#farbe> | <material>
 Optional am Zeilenende: " | mirror" und/oder " | points x y, x y, ..."
@@ -95,6 +165,11 @@ box | Platte | 1.2 0.06 0.7 | 0 0.75 0 | 0 0 0 | #8b5a2b | wood
 box | Bein vorne | 0.06 0.72 0.06 | 0.54 0.36 0.29 | 0 0 0 | #6b4220 | wood | mirror
 box | Bein hinten | 0.06 0.72 0.06 | 0.54 0.36 -0.29 | 0 0 0 | #6b4220 | wood | mirror
 lathe | Vase | 1 | 0.2 0.78 0 | 0 0 0 | #3fa7d6 | plastic | points 0 0, 0.07 0.01, 0.09 0.08, 0.04 0.2, 0.05 0.24`;
+
+export function model3dSystemPrompt() {
+  return `Du bist ein 3D-Modellierer. Du baust 3D-Modelle aus Grundformen. Antworte NUR im FORGE-Format: erst eine Namenszeile, dann genau eine Zeile pro Teil.
+
+${FORGE3D_RULES}`;
 }
 
 // Grammatik für das FORGE-Format: erzwingt gültige Zeilen und spart viele Token gegenüber JSON
