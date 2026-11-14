@@ -53,6 +53,8 @@ jobs:
           rm -rf pack/python/Lib/test pack/python/Lib/idlelib/idle_test pack/python/Lib/tkinter/test
           rm -rf "$SITE"/pygame/docs "$SITE"/pygame/examples "$SITE"/pygame/tests
           find pack -type d -name "__pycache__" -prune -exec rm -rf {} +
+          find pack -name "*.pdb" -delete
+          rm -rf pack/python/include pack/python/libs
           find "$SITE" -type d -name tests -prune -exec rm -rf {} +
           printf '{"tag":"%s","python":"%s","packages":"%s"}\n' "$TAG" "$(basename "$URL")" "$PKGS" > pack/python/forge-python.json
           (cd pack && zip -qr -9 ../forge-python-win64.zip python)

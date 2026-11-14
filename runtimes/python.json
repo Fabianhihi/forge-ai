@@ -1,5 +1,5 @@
 {
-  "tag": "python-1",
+  "tag": "python-2",
   "python": "3.12",
   "packages": ["pip", "pygame", "numpy", "pillow", "requests"]
 }
