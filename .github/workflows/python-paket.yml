@@ -1,0 +1,67 @@
+# Baut das eingebaute Python für FORGE AI (Windows, 64 Bit) mit pygame, numpy, pillow und requests.
+# FORGE lädt es einmal automatisch im Hintergrund – der Nutzer muss nichts installieren.
+# Neu bauen: in runtimes/python.json den "tag" erhöhen (z. B. python-2) und im Code (runner.js PY_PACK) anpassen.
+name: Python-Paket bauen
+
+on:
+  push:
+    branches: [main]
+    paths: ['runtimes/python.json']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Python für Windows holen und Pakete hinzufügen
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          TAG=$(jq -r .tag runtimes/python.json)
+          PYVER=$(jq -r .python runtimes/python.json)
+          PKGS=$(jq -r '.packages | join(" ")' runtimes/python.json)
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG gibt es schon."
+            exit 0
+          fi
+          # Portables CPython (python-build-standalone) suchen
+          gh api repos/astral-sh/python-build-standalone/releases/latest > pbs.json
+          URL=$(python3 -c "
+          import json, re, sys
+          v = re.escape('$PYVER')
+          pat = re.compile(r'^cpython-' + v + r'\.\d+\+\d+-x86_64-pc-windows-msvc-install_only\.tar\.gz$')
+          a = [x['browser_download_url'] for x in json.load(open('pbs.json'))['assets'] if pat.match(x['name'])]
+          print(a[0] if a else '')
+          ")
+          if [ -z "$URL" ]; then echo "Kein passendes Python gefunden"; exit 1; fi
+          echo "Python: $URL"
+          curl -fsSL "$URL" -o py.tar.gz
+          mkdir -p pack
+          tar -xzf py.tar.gz -C pack
+          test -f pack/python/python.exe
+          # Windows-Pakete (Wheels) herunterladen und direkt in site-packages entpacken
+          pip download --only-binary=:all: --platform win_amd64 --python-version "$PYVER" --implementation cp -d wheels $PKGS
+          SITE=pack/python/Lib/site-packages
+          mkdir -p "$SITE"
+          for w in wheels/*.whl; do unzip -oq "$w" -d "$SITE"; done
+          # Platz sparen: Tests, Beispiele, Caches
+          rm -rf pack/python/Lib/test pack/python/Lib/idlelib/idle_test pack/python/Lib/tkinter/test
+          rm -rf "$SITE"/pygame/docs "$SITE"/pygame/examples "$SITE"/pygame/tests
+          find pack -type d -name "__pycache__" -prune -exec rm -rf {} +
+          find "$SITE" -type d -name tests -prune -exec rm -rf {} +
+          printf '{"tag":"%s","python":"%s","packages":"%s"}\n' "$TAG" "$(basename "$URL")" "$PKGS" > pack/python/forge-python.json
+          (cd pack && zip -qr -9 ../forge-python-win64.zip python)
+          SHA=$(sha256sum forge-python-win64.zip | cut -d' ' -f1)
+          SIZE=$(stat -c %s forge-python-win64.zip)
+          printf '{"tag":"%s","file":"forge-python-win64.zip","sha256":"%s","size":%s}\n' "$TAG" "$SHA" "$SIZE" > forge-python-win64.json
+          cat forge-python-win64.json
+          ls -la wheels
+          gh release create "$TAG" forge-python-win64.zip forge-python-win64.json \
+            --title "FORGE-Python ($TAG)" \
+            --notes "Eingebautes Python für FORGE AI (Windows 64 Bit) mit $PKGS. Wird von FORGE automatisch geladen – nicht manuell herunterladen nötig." \
+            --latest=false
