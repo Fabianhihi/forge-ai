@@ -342,15 +342,28 @@ export class Viewer3D {
     this._resize = this.resize.bind(this);
     new ResizeObserver(this._resize).observe(container);
     this.resize();
+    // Nur zeichnen, wenn sich etwas ändert. So nimmt die 3D-Ansicht der KI
+    // keine Grafikkarten-Leistung weg (vorher lief sie ständig mit 60 Bildern/s).
+    this._dirty = true;
+    this.controls.addEventListener('change', () => (this._dirty = true));
     const loop = () => {
       requestAnimationFrame(loop);
-      this.controls.update();
-      this.composer.render();
+      if (this.container.offsetParent === null) return; // Ansicht unsichtbar (Code-Modus)
+      const moved = this.controls.update();
+      if (moved || this._dirty || this.controls.autoRotate) {
+        this._dirty = false;
+        this.composer.render();
+      }
     };
     loop();
   }
 
+  requestRender() {
+    this._dirty = true;
+  }
+
   resize() {
+    this._dirty = true;
     const w = Math.max(this.container.clientWidth, 1);
     const h = Math.max(this.container.clientHeight, 1);
     this.renderer.setSize(w, h);
@@ -371,6 +384,7 @@ export class Viewer3D {
     }
     this.modelGroup = null;
     this.model = null;
+    this._dirty = true;
   }
 
   setModel(model, { keepCamera = false } = {}) {
@@ -395,6 +409,7 @@ export class Viewer3D {
     this.sun.target.position.copy(center);
     sh.updateProjectionMatrix();
     if (!keepCamera) this.frame();
+    this._dirty = true;
     return this.modelGroup;
   }
 
@@ -411,6 +426,7 @@ export class Viewer3D {
     this.camera.updateProjectionMatrix();
     this.controls.target.copy(center);
     this.controls.update();
+    this._dirty = true;
   }
 
   setAutoRotate(on) {
@@ -418,9 +434,11 @@ export class Viewer3D {
   }
   setGrid(on) {
     this.grid.visible = on;
+    this._dirty = true;
   }
   setWireframe(on) {
     this.wireframe = on;
+    this._dirty = true;
     if (this.modelGroup) this.modelGroup.traverse((o) => o.isMesh && (o.material.wireframe = on));
   }
 
@@ -444,6 +462,7 @@ export class Viewer3D {
         m.emissiveIntensity = m.userData.origEI;
       }
     });
+    this._dirty = true;
   }
 
   screenshot() {

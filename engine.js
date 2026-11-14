@@ -73,10 +73,12 @@ class Engine extends EventEmitter {
     this.modelsDir = path.join(dataDir, 'models');
     this.configPath = path.join(dataDir, 'forge-engine.json');
     fs.mkdirSync(this.modelsDir, { recursive: true });
-    this.config = { modelId: null, customPath: null, ctx: 16384 };
+    this.config = { modelId: null, customPath: null, ctx: 8192 };
     try {
       Object.assign(this.config, JSON.parse(fs.readFileSync(this.configPath, 'utf8')));
     } catch {}
+    // Ab 1.4: kleinerer Standard-Kontext ist deutlich schneller (außer der Nutzer hat selbst etwas eingestellt)
+    if (!this.config.ctxUserSet) this.config.ctx = 8192;
     this.state = { status: 'idle', message: '', error: null, hardware: null, active: null, download: null, loadProgress: 0 };
     this.lib = null;
     this.llama = null;
@@ -137,7 +139,9 @@ class Engine extends EventEmitter {
     const hw = this.state.hardware || {};
     const vram = hw.gpu ? hw.vramGB || 0 : 0;
     const ram = hw.ramGB || 8;
-    let id = vram >= 11 ? 'stark' : vram >= 5.5 ? 'standard' : ram >= 15 ? 'standard' : 'leicht';
+    // Ohne passende Grafikkarte ist das kleine Modell deutlich flüssiger
+    let id = vram >= 11 ? 'stark' : vram >= 5.5 ? 'standard' : 'leicht';
+    void ram;
     const free = this.freeDiskGB();
     const order = ['leicht', 'standard', 'stark'];
     if (free != null) {
@@ -268,6 +272,7 @@ class Engine extends EventEmitter {
 
   async setCtx(n) {
     this.config.ctx = n;
+    this.config.ctxUserSet = true;
     this.saveConfig();
     await this.unload();
     this.start();
@@ -413,9 +418,20 @@ class Engine extends EventEmitter {
       this.model = await this.llama.loadModel({ modelPath, gpuLayers: 0, onLoadProgress });
     }
     if (run !== this.runId) return;
-    const max = Math.max(4096, this.config.ctx || 16384);
+    const max = Math.max(4096, this.config.ctx || 8192);
     this.context = await this.model.createContext({ contextSize: { min: 4096, max } });
-    this.session = new this.lib.LlamaChatSession({ contextSequence: this.context.getSequence(), autoDisposeSequence: false });
+    // Token-Vorhersage: Wiederholt die KI Teile der Eingabe (Code ändern, 3D-Modell ändern),
+    // werden mehrere Token auf einmal geprüft statt einzeln – das Ergebnis bleibt identisch.
+    let sequence;
+    try {
+      sequence = this.context.getSequence({
+        tokenPredictor: new this.lib.InputLookupTokenPredictor({ patternLength: { min: 2 }, predictionLength: { max: 8 } }),
+      });
+    } catch (err) {
+      this.log('warn', 'Token-Vorhersage nicht verfügbar: ' + err.message);
+      sequence = this.context.getSequence();
+    }
+    this.session = new this.lib.LlamaChatSession({ contextSequence: sequence, autoDisposeSequence: false });
     if (run !== this.runId) return;
     this.set({
       status: 'ready',
@@ -426,6 +442,24 @@ class Engine extends EventEmitter {
     this._resolveReady();
   }
 
+  // ---------- Vorladen: Systemprompt schon mal verarbeiten, damit die erste Antwort sofort startet ----------
+  preload(messages) {
+    const job = this.queue.then(async () => {
+      if (this.state.status !== 'ready' || !this.session) return false;
+      const t0 = Date.now();
+      const toItem = (m) => (m.role === 'system' ? { type: 'system', text: m.content } : { type: 'user', text: m.content });
+      this.session.setChatHistory(messages.map(toItem));
+      await this.session.preloadPrompt('');
+      this.log('info', `Systemprompt vorgeladen (${Date.now() - t0} ms)`);
+      return true;
+    });
+    this.queue = job.catch(() => {});
+    return job.catch((err) => {
+      this.log('warn', 'Vorladen fehlgeschlagen: ' + err.message);
+      return false;
+    });
+  }
+
   // ---------- Chat ----------
   chat(req, onText, signal) {
     const job = this.queue.then(() => this._chat(req, onText, signal));
@@ -433,7 +467,7 @@ class Engine extends EventEmitter {
     return job;
   }
 
-  async _chat({ messages, temperature = 0.3, schema, maxTokens }, onText, signal) {
+  async _chat({ messages, temperature = 0.3, schema, gbnf, maxTokens }, onText, signal) {
     if (this.state.status !== 'ready' || !this.session) {
       if (this.state.status === 'error') throw new Error(this.state.error || 'Die KI konnte nicht starten.');
       if (!['detecting', 'downloading', 'loading'].includes(this.state.status)) throw new Error('NO_MODEL: Es ist noch kein KI-Modell geladen. Wähle eins unter „Modelle“.');
@@ -446,11 +480,11 @@ class Engine extends EventEmitter {
     const last = messages[messages.length - 1];
     this.session.setChatHistory(messages.slice(0, -1).map(toItem));
     let grammar;
-    if (schema) {
-      const key = JSON.stringify(schema);
+    if (schema || gbnf) {
+      const key = gbnf || JSON.stringify(schema);
       grammar = this.grammarCache.get(key);
       if (!grammar) {
-        grammar = await this.llama.createGrammarForJsonSchema(schema);
+        grammar = gbnf ? await this.llama.createGrammar({ grammar: gbnf }) : await this.llama.createGrammarForJsonSchema(schema);
         this.grammarCache.set(key, grammar);
       }
     }

@@ -46,6 +46,7 @@ contextBridge.exposeInMainWorld('forge', {
     select: (id) => ipcRenderer.invoke('engine:select', id),
     retry: () => ipcRenderer.invoke('engine:retry'),
     cancel: () => ipcRenderer.invoke('engine:cancel'),
+    preload: (messages) => ipcRenderer.invoke('engine:preload', messages),
     remove: (id) => ipcRenderer.invoke('engine:delete', id),
     setCtx: (n) => ipcRenderer.invoke('engine:setCtx', n),
     openFolder: () => ipcRenderer.invoke('engine:openFolder'),

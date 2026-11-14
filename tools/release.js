@@ -1,6 +1,6 @@
 // Baut die Update-Dateien für ein Release und lädt sie optional zu GitHub hoch.
 //
-//   node tools/release.js --out dist-release [--setup FORGE-AI-Setup.exe] [--notes "Was ist neu"] [--publish]
+//   node tools/release.js --out dist-release [--notes "Was ist neu"] [--repo-dir ../forge-ai-repo]
 //
 // Erzeugt:
 //   forge-app-<version>.json.gz   kleines App-Update (nur Code, ca. 1 MB)
@@ -10,7 +10,6 @@ const fs = require('fs');
 const path = require('path');
 const zlib = require('zlib');
 const crypto = require('crypto');
-const { execFileSync } = require('child_process');
 
 const ROOT = path.join(__dirname, '..');
 const args = process.argv.slice(2);
@@ -18,7 +17,6 @@ const opt = (name, def) => {
   const i = args.indexOf('--' + name);
   return i >= 0 ? args[i + 1] : def;
 };
-const flag = (name) => args.includes('--' + name);
 
 const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
 const version = pkg.version;
@@ -78,11 +76,13 @@ fs.writeFileSync(path.join(outDir, 'update.json'), JSON.stringify(manifest, null
 console.log('Update-Dateien in', outDir);
 console.log(JSON.stringify(manifest, null, 2));
 
-// 3) Veröffentlichen
-if (flag('publish')) {
-  if (!repo || /OWNER/.test(repo)) throw new Error('Kein GitHub-Repo in package.json (forge.updateRepo) eingetragen');
-  const assets = [path.join(outDir, 'update.json'), path.join(outDir, appName)];
-  if (manifest.full) assets.push(path.join(outDir, manifest.full.file));
-  execFileSync('gh', ['release', 'create', `v${version}`, '--repo', repo, '--title', `FORGE AI ${version}`, '--notes', notes, ...assets], { stdio: 'inherit' });
-  console.log(`Veröffentlicht: https://github.com/${repo}/releases/tag/v${version}`);
+// 3) In das GitHub-Repository legen (die GitHub-Automatik macht daraus ein Release)
+const repoDir = opt('repo-dir');
+if (repoDir) {
+  const upd = path.join(repoDir, 'updates');
+  fs.mkdirSync(upd, { recursive: true });
+  for (const f of fs.readdirSync(upd)) if (/^forge-app-.*\.json\.gz$/.test(f) || /^FORGE-AI-Setup-.*\.exe$/.test(f)) fs.rmSync(path.join(upd, f));
+  fs.copyFileSync(path.join(outDir, 'update.json'), path.join(upd, 'update.json'));
+  fs.copyFileSync(path.join(outDir, appName), path.join(upd, appName));
+  console.log(`Update-Dateien liegen in ${upd}. Jetzt committen und pushen – GitHub erstellt das Release v${version} automatisch.`);
 }

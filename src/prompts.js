@@ -58,43 +58,125 @@ const EXAMPLE = {
 };
 
 export function model3dSystemPrompt() {
-  return `Du bist ein 3D-Modellierer. Du baust 3D-Modelle aus Grundformen ("parts"). Antworte NUR mit JSON.
+  return `Du bist ein 3D-Modellierer. Du baust 3D-Modelle aus Grundformen. Antworte NUR im FORGE-Format: erst eine Namenszeile, dann genau eine Zeile pro Teil.
+
+FORMAT
+name: <Name des Modells>
+<form> | <teilname> | <größe> | <x y z> | <drehung x y z> | <#farbe> | <material>
+Optional am Zeilenende: " | mirror" und/oder " | points x y, x y, ..."
 
 KOORDINATEN
 - Y zeigt nach oben, Einheit = Meter. Das Modell steht auf dem Boden (unterste Stelle y=0) und ist um x=0, z=0 zentriert.
 - Die Vorderseite zeigt nach +Z. Links/rechts ist X.
-- position = Mittelpunkt des Teils. rotation = Drehung in Grad [x, y, z].
+- Position = Mittelpunkt des Teils. Drehung in Grad.
 
-FORMEN (shape) und size
-- box: [breite, höhe, tiefe]
-- sphere: [radius]
-- cylinder: [radiusOben, höhe, radiusUnten]  (steht senkrecht entlang Y; für liegende Rohre rotation [90,0,0] oder [0,0,90])
-- cone: [radius, höhe]  (Spitze zeigt nach +Y)
-- torus: [radius, rohrRadius]  (Ring steht in der XY-Ebene; liegend: rotation [90,0,0])
-- capsule: [radius, länge]  (senkrecht entlang Y)
-- wedge: [breite, höhe, tiefe]  (Keil/Rampe)
-- lathe: Rotationskörper um die Y-Achse (Vasen, Flaschen, Kuppeln, Säulen, Kelche). points = [[radius, y], ...] von unten nach oben, relativ zu position. size = [1].
-- extrude: flache Umrissform mit Dicke (Klingen, Flügel, Flossen, Sterne, Schilde). points = [[x, y], ...] Umriss in der XY-Ebene relativ zu position, size = [dicke].
+FORMEN und größe
+- box: breite höhe tiefe
+- sphere: radius
+- cylinder: radiusOben höhe radiusUnten (steht senkrecht; liegend: drehung 90 0 0 oder 0 0 90)
+- cone: radius höhe (Spitze nach oben)
+- torus: radius rohrRadius (Ring steht aufrecht; liegend: drehung 90 0 0)
+- capsule: radius länge
+- wedge: breite höhe tiefe (Keil/Rampe)
+- lathe: Rotationskörper (Vasen, Flaschen, Kuppeln, Säulen). größe = 1. Dazu "points radius y, radius y, ..." von unten nach oben.
+- extrude: flache Umrissform mit Dicke (Klingen, Flügel, Flossen, Sterne). größe = dicke. Dazu "points x y, x y, ..." als Umriss.
 
-MATERIAL: matte, plastic, metal, glass, glow (leuchtet), wood, stone.
-SYMMETRIE: "mirrorX": true erzeugt automatisch eine Spiegelkopie auf der anderen Seite (bei -x). Nutze das für Arme, Beine, Räder, Flügel, Augen usw. und platziere das Original auf der +x Seite. Sonst "mirrorX": false.
-POINTS: nur bei lathe und extrude ausfüllen, bei allen anderen Formen "points": [].
+MATERIAL: matte, plastic, metal, glass, glow (leuchtet), wood, stone
+MIRROR: "| mirror" erzeugt automatisch eine Spiegelkopie auf der anderen Seite (bei -x). Nutze das für Arme, Beine, Räder, Flügel, Augen. Das Original kommt auf die +x Seite.
 
 REGELN
-- Schreib zuerst in "plan" kurz, welche Teile du baust und wie groß sie sind.
-- Alle Teile müssen sich berühren oder leicht überlappen. Nichts schwebt lose.
-- Achte auf realistische Proportionen und Maße in Metern.
-- Füge Details hinzu (Augen, Fenster, Nieten, Griffe, Lichter), damit das Modell gut aussieht.
-- Nutze passende, schöne Farben als Hex (#rrggbb).
+- Alle Teile berühren sich oder überlappen leicht. Nichts schwebt lose.
+- Realistische Proportionen in Metern. Schöne, passende Farben.
+- Ein paar Details (Augen, Fenster, Lichter, Griffe) machen das Modell lebendig.
 
 BEISPIEL
-${JSON.stringify(EXAMPLE)}`;
+name: Holztisch
+box | Platte | 1.2 0.06 0.7 | 0 0.75 0 | 0 0 0 | #8b5a2b | wood
+box | Bein vorne | 0.06 0.72 0.06 | 0.54 0.36 0.29 | 0 0 0 | #6b4220 | wood | mirror
+box | Bein hinten | 0.06 0.72 0.06 | 0.54 0.36 -0.29 | 0 0 0 | #6b4220 | wood | mirror
+lathe | Vase | 1 | 0.2 0.78 0 | 0 0 0 | #3fa7d6 | plastic | points 0 0, 0.07 0.01, 0.09 0.08, 0.04 0.2, 0.05 0.24`;
 }
 
-export const DETAIL_TOKENS = { 1: 2500, 2: 5000, 3: 9000 };
+// Grammatik für das FORGE-Format: erzwingt gültige Zeilen und spart viele Token gegenüber JSON
+export const MODEL_GRAMMAR = String.raw`root ::= "name: " title "\n" part{1,90}
+title ::= [^\n|]{1,48}
+part ::= shape " | " label " | " size " | " vec3 " | " vec3 " | " color " | " material mirror? points? "\n"
+shape ::= "box" | "sphere" | "cylinder" | "cone" | "torus" | "capsule" | "wedge" | "lathe" | "extrude"
+label ::= [^\n|]{1,32}
+num ::= "-"? [0-9]{1,3} ("." [0-9]{1,3})?
+size ::= num (" " num){0,2}
+vec3 ::= num " " num " " num
+color ::= "#" [0-9a-fA-F]{6}
+material ::= "matte" | "plastic" | "metal" | "glass" | "glow" | "wood" | "stone"
+mirror ::= " | mirror"
+points ::= " | points " num " " num (", " num " " num){1,23}`;
+
+// Eine Zeile im FORGE-Format → Teil (oder null)
+export function parseModelLine(line) {
+  const cols = String(line).split('|').map((c) => c.trim());
+  if (cols.length < 7) return null;
+  const nums = (t) => (t.match(/-?\d+(?:\.\d+)?/g) || []).map(Number);
+  const part = {
+    shape: cols[0].toLowerCase(),
+    name: cols[1] || cols[0],
+    size: nums(cols[2]),
+    position: nums(cols[3]).slice(0, 3),
+    rotation: nums(cols[4]).slice(0, 3),
+    color: cols[5],
+    material: cols[6].toLowerCase(),
+  };
+  for (const extra of cols.slice(7)) {
+    if (/^mirror/i.test(extra)) part.mirrorX = true;
+    else if (/^points/i.test(extra)) {
+      part.points = extra
+        .replace(/^points\s*/i, '')
+        .split(',')
+        .map((pt) => nums(pt))
+        .filter((pt) => pt.length >= 2)
+        .map((pt) => pt.slice(0, 2));
+    }
+  }
+  if (!SHAPES.includes(part.shape) || part.position.length < 3) return null;
+  while (part.rotation.length < 3) part.rotation.push(0);
+  return part;
+}
+
+// Ganzer Text im FORGE-Format → Modell
+export function parseModelText(text) {
+  const lines = String(text).split('\n');
+  let name = 'Modell';
+  const parts = [];
+  for (const raw of lines) {
+    const line = raw.trim();
+    if (!line) continue;
+    const m = line.match(/^name\s*:\s*(.+)$/i);
+    if (m) {
+      name = m[1].trim();
+      continue;
+    }
+    const p = parseModelLine(line);
+    if (p) parts.push(p);
+  }
+  return { name, parts };
+}
+
+// Modell → FORGE-Format (für Änderungen; spart Token)
+export function modelToText(model) {
+  const r = (v) => String(Math.round(v * 1000) / 1000);
+  const lines = [`name: ${model.name}`];
+  for (const p of model.parts) {
+    let line = `${p.shape} | ${p.name} | ${p.size.map(r).join(' ')} | ${p.position.map(r).join(' ')} | ${p.rotation.map(r).join(' ')} | ${p.color} | ${p.material}`;
+    if (p.mirrorX) line += ' | mirror';
+    if (p.points && p.points.length) line += ' | points ' + p.points.map((pt) => pt.map(r).join(' ')).join(', ');
+    lines.push(line);
+  }
+  return lines.join('\n');
+}
+
+export const DETAIL_TOKENS = { 1: 900, 2: 1800, 3: 3600 };
 
 export const DETAIL_LEVELS = {
-  1: 'Baue das Modell einfach und klar mit etwa 8 bis 15 Teilen.',
-  2: 'Baue das Modell mit etwa 20 bis 35 Teilen und schönen Details.',
-  3: 'Baue das Modell sehr detailliert mit etwa 40 bis 70 Teilen.',
+  1: 'Baue das Modell einfach und klar mit etwa 6 bis 12 Teilen.',
+  2: 'Baue das Modell mit etwa 12 bis 25 Teilen und ein paar schönen Details.',
+  3: 'Baue das Modell detailliert mit etwa 30 bis 50 Teilen.',
 };

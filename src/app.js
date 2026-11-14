@@ -1,8 +1,8 @@
 // FORGE AI – Oberfläche
 import { Marked } from 'marked';
 import hljs from 'highlight.js/lib/common';
-import { codeSystemPrompt, model3dSystemPrompt, MODEL_SCHEMA, DETAIL_LEVELS, DETAIL_TOKENS } from './prompts.js';
-import { Viewer3D, extractJson, normalizeModel, compactModel } from './viewer3d.js';
+import { codeSystemPrompt, model3dSystemPrompt, MODEL_GRAMMAR, DETAIL_LEVELS, DETAIL_TOKENS, parseModelText, modelToText } from './prompts.js';
+import { Viewer3D, extractJson, normalizeModel } from './viewer3d.js';
 
 const forge = window.forge;
 const $ = (s, el = document) => el.querySelector(s);
@@ -153,6 +153,9 @@ function onEngine(st) {
   renderEngineOverlay();
   if (st.status === 'ready' && !wasReady && S.setupShown) {
     toast(`${S.settings.aiName} ist bereit!`, 'ok');
+  }
+  if (st.status === 'ready' && !wasReady) {
+    forge.engine.preload([{ role: 'system', content: codeSystemPrompt(S.settings.aiName) }]).catch(() => {});
   }
 }
 
@@ -327,26 +330,31 @@ function fillAi(el, m, final, isLast) {
     html += `<div class="err-box">${esc(m.error.replace('NO_MODEL: ', ''))}<div><button class="btn sm" data-act="setup">KI-Modelle öffnen</button></div></div>`;
   }
   if (final && (m.content || m.error)) {
+    const activeId = S.engine && S.engine.active && S.engine.active.id;
+    const slow = isLast && m.tps && m.tps < 6 && activeId && activeId !== 'leicht' && activeId !== 'test';
     html += `<div class="msg-meta"><button data-act="copyall">${I.copy}Kopieren</button>${
       isLast ? `<button data-act="regen">${I.redo}Neu generieren</button>` : ''
-    }<span class="sep"></span><span>${esc(m.model || '')}${m.tps ? ` · ${m.tps.toFixed(1).replace('.', ',')} Token/s` : ''}${m.stopped ? ' · gestoppt' : ''}</span></div>`;
+    }${slow ? `<button data-act="setup" class="speed-tip" title="Ein kleineres Modell antwortet deutlich schneller">⚡ Zu langsam? Schnelleres Modell wählen</button>` : ''}<span class="sep"></span><span>${esc(m.model || '')}${m.tps ? ` · ${m.tps.toFixed(1).replace('.', ',')} Token/s` : ''}${m.stopped ? ' · gestoppt' : ''}</span></div>`;
   }
   body.innerHTML = html;
   decorateCodeblocks(body);
 }
 
 let renderPending = false;
+let lastRenderAt = 0;
 const finished = new WeakSet();
 function scheduleRender(el, m) {
   if (renderPending) return;
   renderPending = true;
-  requestAnimationFrame(() => {
+  const wait = Math.max(0, 70 - (performance.now() - lastRenderAt));
+  setTimeout(() => requestAnimationFrame(() => {
     renderPending = false;
+    lastRenderAt = performance.now();
     if (finished.has(m)) return;
     const stick = nearBottom();
     fillAi(el, m, false, true);
     if (stick) scrollBottom();
-  });
+  }), wait);
 }
 
 function nearBottom() {
@@ -432,7 +440,7 @@ async function sendMessage(regenerate = false) {
       scheduleRender(el, ai);
     });
     if (res && res.aborted) ai.stopped = true;
-    if (res && res.tps) ai.tps = res.tps;
+    if (res && res.tps) ai.tps = S.lastTps = res.tps;
     ai.model = activeLabel();
   } catch (err) {
     ai.error = err.message;
@@ -776,25 +784,56 @@ async function generate3D(editInstruction) {
     return toast('Beschreib zuerst, was gebaut werden soll', 'err');
   }
   const viewer = ensureViewer();
+  const before = editInstruction ? viewer.model : null;
   let userMsg;
+  let maxTokens;
   if (editInstruction) {
-    if (!viewer.model) return;
-    userMsg = `Hier ist das aktuelle Modell:\n${compactModel(viewer.model)}\n\nÄnderungswunsch: ${editInstruction}\n\nGib das KOMPLETTE geänderte Modell als JSON zurück (alle Teile, auch die unveränderten). Schreib in "plan" kurz, was du änderst.`;
+    if (!before) return;
+    userMsg = `Hier ist das aktuelle Modell:\n${modelToText(before)}\n\nÄnderungswunsch: ${editInstruction}\n\nGib das KOMPLETTE geänderte Modell im FORGE-Format zurück (alle Teile, auch die unveränderten).`;
+    maxTokens = Math.min(6000, 400 + before.parts.length * 60);
   } else {
     const styles = [...S.styles].join(', ');
     userMsg = `Baue dieses 3D-Modell: ${prompt}\n${styles ? `Stil: ${styles}\n` : ''}${DETAIL_LEVELS[S.detail]}`;
+    maxTokens = DETAIL_TOKENS[S.detail] || 1800;
   }
+
+  const dbgMax = Number(load('forge.debugMaxTokens', 0)); // nur für Tests
+  if (dbgMax) maxTokens = Math.min(maxTokens, dbgMax);
 
   setBusy(true);
   $('#gen3dStatus').hidden = false;
-  $('#genText').textContent = editInstruction ? 'Ändere Modell …' : 'Plane das Modell …';
+  $('#genText').textContent = editInstruction ? 'Ändere Modell …' : 'Baue das Modell …';
   $('#genPlan').textContent = '';
+
+  // Live-Aufbau: Jedes fertige Teil erscheint sofort in der 3D-Ansicht
+  let text = '';
+  let shown = 0;
+  let framed = !!editInstruction;
+  let lastDraw = 0;
+  const t0 = performance.now();
+  const drawLive = (force) => {
+    const now = performance.now();
+    if (!force && now - lastDraw < 180) return;
+    const done = text.slice(0, text.lastIndexOf('\n') + 1);
+    const live = parseModelText(done);
+    if (live.parts.length === shown && !force) return;
+    if (!live.parts.length) return;
+    lastDraw = now;
+    shown = live.parts.length;
+    try {
+      const m = normalizeModel(live);
+      showModel(m, framed);
+      if (!framed && shown >= 3) {
+        viewer.frame();
+        framed = true;
+      }
+    } catch {}
+    $('#genText').textContent = `Baue Teile … ${shown}`;
+  };
 
   try {
     const id = uid();
     S.streamId = id;
-    let text = '';
-    let tick = 0;
     const res = await forge.chat(
       id,
       {
@@ -803,33 +842,32 @@ async function generate3D(editInstruction) {
           { role: 'user', content: userMsg },
         ],
         temperature: 0.45,
-        schema: MODEL_SCHEMA,
-        maxTokens: editInstruction ? 9000 : DETAIL_TOKENS[S.detail] || 5000,
+        gbnf: MODEL_GRAMMAR,
+        maxTokens,
       },
       (d) => {
         if (d.waiting) $('#genText').textContent = 'KI startet noch …';
-        if (d.text) text += d.text;
-        if (++tick % 6 === 0) {
-          const plan = text.match(/"plan"\s*:\s*"((?:[^"\\]|\\.)*)/);
-          if (plan) $('#genPlan').textContent = plan[1].replace(/\\n/g, ' ').replace(/\\"/g, '"');
-          const n = (text.match(/"shape"/g) || []).length;
-          if (n) $('#genText').textContent = `Baue Teile … ${n}`;
+        if (d.text) {
+          text += d.text;
+          if (d.text.includes('\n')) drawLive(false);
         }
       }
     );
-    const out = { text, aborted: res && res.aborted };
-    if (out.aborted) {
+    if (res && res.aborted && !text.trim()) {
       toast('Abgebrochen');
       return;
     }
-    const raw = extractJson(out.text);
-    if (!raw) throw new Error('Die KI hat kein gültiges Modell geliefert. Versuch es nochmal oder wähle „Einfach“.');
+    let raw = parseModelText(text);
+    if (!raw.parts.length) raw = extractJson(text) || raw; // Notfall: falls doch JSON kommt
     const m = normalizeModel(raw);
-    showModel(m, !!editInstruction);
+    showModel(m, true);
+    if (!editInstruction) viewer.frame();
     saveToLibrary(m, editInstruction ? `${prompt} → ${editInstruction}` : prompt);
     if (editInstruction) $('#edit3d').value = '';
-    toast(`„${m.name}“ fertig – ${m.parts.length} Teile`, 'ok');
+    const secs = Math.max(1, Math.round((performance.now() - t0) / 1000));
+    toast(`„${m.name}“ fertig – ${m.parts.length} Teile in ${secs} s`, 'ok');
   } catch (err) {
+    if (before) showModel(before, true);
     toast(err.message.replace('NO_MODEL: ', ''), 'err');
     if (/NO_MODEL/.test(err.message)) openModels();
   } finally {
@@ -1014,6 +1052,7 @@ function renderModels() {
     ${st.status === 'idle' && !st.active ? '<div class="notice">Wähle ein Modell, damit deine KI starten kann.</div>' : ''}
     ${custom ? `<div class="notice">Aktiv: eigenes Modell <b>${esc(st.active.params)}</b></div>` : ''}
     ${st.notice ? `<div class="notice">${esc(st.notice)}</div>` : ''}
+    ${st.status === 'ready' ? `<div class="notice small">⚡ Läuft auf: <b>${st.hardware && st.hardware.gpu ? 'Grafikkarte' : 'Prozessor (langsamer)'}</b>${S.lastTps ? ` · zuletzt <b>${S.lastTps.toFixed(1).replace('.', ',')} Token/s</b>` : ''}. Kleinere Modelle sind schneller, größere klüger.</div>` : ''}
     <div class="model-cards">${cards}</div>
     <div class="actions between">
       <div style="display:flex;gap:8px">

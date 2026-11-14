@@ -318,3 +318,5 @@ details.think div { white-space: pre-wrap; margin-top: 6px; max-height: 260px; o
 @keyframes fall { to { top: 105%; transform: translateX(40px) rotate(720deg); } }
 @keyframes pop { from { transform: scale(.7); opacity: 0; } }
 @keyframes wiggle { 0%, 100% { transform: rotate(-8deg); } 50% { transform: rotate(8deg) scale(1.08); } }
+.msg-meta .speed-tip { color: var(--accent-2); background: var(--accent-soft); }
+.msg-meta .speed-tip:hover { color: #fff; background: rgba(255, 122, 26, .22); }
