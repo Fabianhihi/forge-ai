@@ -1,7 +1,7 @@
 {
   "name": "forge-ai",
   "productName": "FORGE AI",
-  "version": "1.7.0",
+  "version": "1.8.0",
   "description": "Deine eigene lokale KI für Code und 3D-Modelle – eingebauter KI-Motor, ohne Cloud, ohne API-Key.",
   "main": "boot.js",
   "author": "Du",

@@ -1,10 +1,10 @@
 {
-  "version": "1.7.0",
+  "version": "1.8.0",
   "runtime": "electron-45.3.2+nlc-3.22.3",
-  "notes": "Drei Bots für alles! 🤖\n💬 Allrounder: zum Quatschen, für Fragen, Ideen und Texte – mit eigenem Chat-Modell\n⌨ Coder: dein Programmier-Profi für Code, Mods und Spiele\n◆ 3D-Designer: baut 3D-Modelle direkt im Chat – mit einem Klick in 3D öffnen\nJeder Bot hat sein eigenes Modell, FORGE wechselt automatisch",
+  "notes": "Spiele & Programme direkt in FORGE! ▶\nHTML-Spiele und Webseiten öffnen sich rechts neben dem Chat – mit Konsole, Vollbild und eigenem Fenster\nCode in vielen Sprachen ausführen: JavaScript, TypeScript, Python, PowerShell, Java, C++, Go, Rust und mehr\nProgramme mit Eingabe funktionieren – einfach unten ins Feld tippen\nFehlt eine Sprache oder ein Python-Paket wie pygame, installiert FORGE es mit einem Klick\nDer Coder wählt jetzt die passende Sprache statt immer Python",
   "app": {
-    "file": "forge-app-1.7.0.json.gz",
-    "sha256": "42292689cfeee88323df37583f2adbdf8c3c186e68c46f3f578f61433afe8fb6",
-    "size": 463581
+    "file": "forge-app-1.8.0.json.gz",
+    "sha256": "502f828f90ee3a35b5799265ce4ae4272eb533245fbe67c84c33fd070e739b4d",
+    "size": 478764
   }
 }

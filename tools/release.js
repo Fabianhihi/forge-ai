@@ -43,6 +43,7 @@ const FILES = [
   'preload.js',
   'engine.js',
   'engine-worker.js',
+  'runner.js',
   'renderer/index.html',
   'renderer/styles.css',
   'renderer/hljs.css',

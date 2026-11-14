@@ -5,6 +5,9 @@ const path = require('path');
 const fs = require('fs');
 const os = require('os');
 
+const runner = require('./runner');
+runner.registerScheme(); // muss vor app.ready passieren
+
 let win = null;
 const chats = new Map(); // id -> webContents
 let quitting = false;
@@ -246,6 +249,7 @@ app.on('second-instance', () => {
 
 app.whenReady().then(() => {
   log('info', `FORGE AI ${app.getVersion()} startet · ${process.platform} ${os.release()} · Electron ${process.versions.electron} · ${Math.round(os.totalmem() / 1024 ** 3)} GB RAM`);
+  runner.handleProtocol();
   createWindow();
   // Alles automatisch: Hardware erkennen → Modell holen → KI starten
   startWorker();
@@ -254,6 +258,7 @@ app.whenReady().then(() => {
 app.on('window-all-closed', () => app.quit());
 app.on('before-quit', () => {
   quitting = true;
+  runner.stopAll();
   if (worker) worker.kill();
 });
 
@@ -358,6 +363,52 @@ ipcMain.on('ai:chat', (e, { id, req }) => {
 
 ipcMain.on('ai:abort', (_e, id) => {
   if (worker) worker.postMessage({ type: 'abort', id });
+});
+
+// ---------- Code ausführen (Spiele, Webseiten, Programme) ----------
+ipcMain.handle('run:preview', (_e, opts) => runner.createPreview(opts || {}));
+ipcMain.handle('run:previewWindow', (_e, url) => {
+  if (/^forge-run:\/\//.test(String(url))) runner.openPreviewWindow(url);
+});
+ipcMain.handle('run:runtimes', (_e, force) => runner.publicRuntimes(!!force));
+ipcMain.handle('run:start', async (e, opts) => {
+  const id = String(opts.id);
+  const send = (type, data) => {
+    if (!e.sender.isDestroyed()) e.sender.send('run:event', id, type, data);
+  };
+  try {
+    await runner.start(id, opts, send);
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: String(err.message || err) };
+  }
+});
+ipcMain.handle('run:input', (_e, id, text) => runner.input(String(id), String(text)));
+ipcMain.handle('run:stop', (_e, id) => runner.stop(String(id)));
+ipcMain.handle('run:pip', async (e, id, module) => {
+  const send = (type, data) => {
+    if (!e.sender.isDestroyed()) e.sender.send('run:event', String(id), type, data);
+  };
+  try {
+    await runner.pipInstall(String(id), String(module), send);
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: String(err.message || err) };
+  }
+});
+ipcMain.handle('run:install', (_e, lang) => runner.installRuntime(String(lang)));
+ipcMain.handle('run:openFile', async () => {
+  const { canceled, filePaths } = await dialog.showOpenDialog(win, {
+    title: 'Datei zum Ausführen öffnen',
+    filters: [
+      { name: 'Spiele, Webseiten & Programme', extensions: ['html', 'htm', 'js', 'ts', 'py', 'ps1', 'bat', 'cmd', 'sh', 'java', 'go', 'lua', 'rb', 'php', 'c', 'cpp', 'rs'] },
+      { name: 'Alle Dateien', extensions: ['*'] },
+    ],
+    properties: ['openFile'],
+  });
+  if (canceled || !filePaths[0]) return null;
+  const p = filePaths[0];
+  return { path: p, name: path.basename(p), dir: path.dirname(p) };
 });
 
 // ---------- Dateien ----------

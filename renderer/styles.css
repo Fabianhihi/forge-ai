@@ -85,7 +85,8 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
 main { flex: 1; min-width: 0; position: relative; }
 .view { position: absolute; inset: 0; display: none; }
 .view.active { display: flex; }
-#codeView { flex-direction: column; }
+#codeView { flex-direction: row; }
+.chat-col { flex: 1; min-width: 360px; display: flex; flex-direction: column; position: relative; }
 .topbar { height: 56px; flex: none; display: flex; align-items: center; justify-content: space-between; padding: 0 22px; border-bottom: 1px solid var(--line); }
 #chatTitle { font-weight: 650; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .chip { font: 12px var(--mono); color: var(--muted); background: var(--panel); border: 1px solid var(--line); padding: 4px 10px; border-radius: 999px; cursor: pointer; }
@@ -104,7 +105,8 @@ main { flex: 1; min-width: 0; position: relative; }
 #messages { max-width: 860px; margin: 0 auto; padding: 24px 24px 12px; }
 .msg { margin: 0 0 22px; display: flex; gap: 14px; }
 .msg.user { justify-content: flex-end; }
-.msg.user .bubble { max-width: 78%; background: var(--elev); border: 1px solid var(--line-2); padding: 10px 14px; border-radius: 14px 14px 4px 14px; white-space: pre-wrap; word-wrap: break-word; }
+.msg.user > div { max-width: 78%; min-width: 0; display: flex; flex-direction: column; align-items: flex-end; }
+.msg.user .bubble { max-width: 100%; background: var(--elev); border: 1px solid var(--line-2); padding: 10px 14px; border-radius: 14px 14px 4px 14px; white-space: pre-wrap; word-wrap: break-word; }
 .msg.user .files { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; justify-content: flex-end; }
 .avatar { width: 30px; height: 30px; border-radius: 9px; background: var(--grad); color: #1a0d03; display: grid; place-items: center; font-weight: 800; font-size: 14px; flex: none; margin-top: 2px; }
 .msg.ai .body { flex: 1; min-width: 0; }
@@ -356,3 +358,45 @@ details.think div { white-space: pre-wrap; margin-top: 6px; max-height: 260px; o
 .mc-sw { display: inline-flex; gap: 3px; }
 .mc-sw i { width: 10px; height: 10px; border-radius: 3px; box-shadow: inset 0 0 0 1px rgba(255,255,255,.15); }
 .mc-actions { display: flex; gap: 6px; }
+
+/* ---------- Ausführen-Panel ---------- */
+#runPanel { width: 48%; min-width: 320px; flex: none; display: flex; flex-direction: column; border-left: 1px solid var(--line); background: #07080b; position: relative; }
+#runPanel[hidden] { display: none !important; }
+#runPanel.max { position: absolute; inset: 0; width: auto !important; z-index: 25; }
+.rp-drag { position: absolute; left: -4px; top: 0; bottom: 0; width: 8px; cursor: col-resize; z-index: 3; }
+.rp-drag:hover { background: rgba(255, 122, 26, .25); }
+body.resizing, body.resizing * { cursor: col-resize !important; user-select: none; }
+body.resizing iframe { pointer-events: none; }
+.rp-head { height: 56px; flex: none; display: flex; align-items: center; gap: 10px; padding: 0 8px 0 16px; border-bottom: 1px solid var(--line); background: var(--panel); }
+.rp-lang { font: 600 11px var(--mono); color: #1a0d03; background: var(--grad); padding: 3px 8px; border-radius: 6px; }
+.rp-title { font-weight: 650; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0; }
+.rp-status { font-size: 12px; color: var(--muted); white-space: nowrap; }
+.rp-status.ok { color: var(--ok); }
+.rp-status.err { color: var(--bad); }
+.rp-status.run { color: var(--accent-2); }
+.rp-actions { display: flex; gap: 2px; }
+.rp-body { flex: 1; min-height: 0; display: flex; flex-direction: column; position: relative; }
+#rpFrame { flex: 1; width: 100%; border: 0; background: #fff; min-height: 0; }
+.rp-console { flex: none; display: flex; flex-direction: column; border-top: 1px solid var(--line); background: #0a0b0f; height: 36px; overflow: hidden; transition: height .15s; }
+#runPanel.con-open .rp-console { height: 190px; }
+#runPanel.proc .rp-console { flex: 1; height: auto; border-top: 0; }
+.rp-con-head { height: 36px; flex: none; display: flex; align-items: center; gap: 8px; padding: 0 8px 0 14px; font-size: 12px; color: var(--muted); cursor: pointer; user-select: none; }
+#runPanel.proc .rp-con-head { cursor: default; }
+.rp-con-head .sep { flex: 1; }
+.rp-errs { color: var(--bad); font-weight: 600; }
+#rpOut { flex: 1; overflow: auto; padding: 8px 14px 12px; font: 12.5px/1.5 var(--mono); white-space: pre-wrap; word-break: break-word; color: #d6dae4; }
+#rpOut .o-stderr, #rpOut .o-error { color: #ff8a8a; }
+#rpOut .o-warn { color: #ffd479; }
+#rpOut .o-info { color: var(--muted); }
+#rpOut .o-input { color: var(--accent-2); }
+#rpOut .pip-offer { margin: 8px 0; font-family: var(--font); }
+#rpIn { display: flex; gap: 6px; padding: 8px; border-top: 1px solid var(--line); }
+#rpIn[hidden] { display: none; }
+#rpIn input { flex: 1; background: var(--panel); border: 1px solid var(--line-2); border-radius: 9px; padding: 8px 11px; outline: 0; font: 13px var(--mono); }
+#rpIn input:focus { border-color: #5a3d26; }
+.rp-msg { position: absolute; inset: 0; z-index: 2; background: #07080b; display: grid; place-items: center; padding: 24px; }
+.rp-missing { max-width: 420px; text-align: center; }
+.rp-missing h3 { margin: 6px 0 8px; }
+.rp-missing p { color: var(--muted); }
+.rp-big { font-size: 46px; }
+.remember { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 13px; margin-top: 6px; }

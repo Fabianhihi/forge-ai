@@ -29,6 +29,10 @@ const updateListeners = new Set();
 ipcRenderer.on('update:update', (_e, st) => {
   for (const fn of updateListeners) fn(st);
 });
+const runListeners = new Set();
+ipcRenderer.on('run:event', (_e, id, type, data) => {
+  for (const fn of runListeners) fn(id, type, data);
+});
 const liveListeners = new Set();
 ipcRenderer.on('update:live', (_e, info) => {
   for (const fn of liveListeners) fn(info);
@@ -69,6 +73,20 @@ contextBridge.exposeInMainWorld('forge', {
     },
     applyLive: () => ipcRenderer.invoke('update:applyLive'),
     booted: () => ipcRenderer.send('app:booted'),
+  },
+  run: {
+    preview: (opts) => ipcRenderer.invoke('run:preview', opts),
+    previewWindow: (url) => ipcRenderer.invoke('run:previewWindow', url),
+    runtimes: (force) => ipcRenderer.invoke('run:runtimes', force),
+    start: (opts) => ipcRenderer.invoke('run:start', opts),
+    input: (id, text) => ipcRenderer.invoke('run:input', id, text),
+    stop: (id) => ipcRenderer.invoke('run:stop', id),
+    pip: (id, module) => ipcRenderer.invoke('run:pip', id, module),
+    install: (lang) => ipcRenderer.invoke('run:install', lang),
+    openFile: () => ipcRenderer.invoke('run:openFile'),
+    onEvent: (fn) => {
+      runListeners.add(fn);
+    },
   },
   copyLog: () => ipcRenderer.invoke('log:copy'),
   openLog: () => ipcRenderer.invoke('log:open'),

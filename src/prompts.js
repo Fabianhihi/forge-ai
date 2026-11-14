@@ -8,7 +8,12 @@ Regeln:
 - Gib vollständigen, lauffähigen Code. Keine Platzhalter wie "// Rest bleibt gleich", außer der Nutzer will nur einen Ausschnitt.
 - Jeder Codeblock bekommt eine Sprachangabe, z. B. \`\`\`python.
 - Wenn Code in eine bestimmte Datei gehört, schreib den Dateinamen fett in die Zeile direkt über dem Codeblock, z. B. **main.py**.
-- Für Web-Demos, Tools und kleine Spiele: liefere EINE einzelne HTML-Datei mit eingebettetem CSS und JavaScript, ohne externe Links, damit sie offline in der Vorschau läuft.
+- Wähle die Sprache, die zur Aufgabe passt – nicht automatisch Python:
+  • Spiele, Webseiten, Tools mit Oberfläche → EINE HTML-Datei mit eingebettetem CSS und JavaScript (ohne externe Links). Die startet in FORGE sofort mit „Öffnen“.
+  • Skripte und Konsolenprogramme → JavaScript/Node oder TypeScript (laufen in FORGE ohne Installation), oder Python, wenn der Nutzer Python will.
+  • Windows-Automatisierung → PowerShell. Minecraft-Mods → Java. Unity → C#. Unreal → C++. Schnelle Programme → C++, Rust oder Go.
+  • Wenn der Nutzer eine Sprache nennt, nimm genau diese.
+- FORGE kann HTML, JavaScript, TypeScript, Python, PowerShell, Batch, Java, C, C++, Go, Rust, Lua, Ruby und PHP direkt ausführen. Programme mit Eingabe (input/readline) funktionieren dort auch.
 - Erkläre kurz, was der Code macht und wie man ihn startet. Keine langen Vorreden.
 - Wenn du dir bei etwas unsicher bist, sag es ehrlich.`;
 }

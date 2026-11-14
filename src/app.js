@@ -105,10 +105,10 @@ md.use({
       } catch {
         html = esc(text);
       }
-      const canRun = ['html', 'svg', 'xml'].includes(l) && /<(html|body|svg|canvas|div|script)/i.test(text);
+      const kind = runKind(l, text, fileHint);
       return `<div class="codeblock" data-lang="${esc(l)}" data-file="${esc(fileHint)}">
 <div class="cb-head"><span class="cb-lang">${esc(l || 'code')}</span><span class="cb-file"></span><div class="cb-actions">
-${canRun ? `<button class="run" data-act="preview">${I.play}Vorschau</button>` : ''}
+${kind ? `<button class="run" data-act="run">${I.play}${kind === 'web' || kind === 'webjs' ? 'Öffnen' : 'Ausführen'}</button>` : ''}
 <button data-act="copy">${I.copy}Kopieren</button><button data-act="save">${I.save}Speichern</button></div></div>
 <pre><code class="hljs">${html}</code></pre></div>`;
     },
@@ -576,6 +576,8 @@ $('#messages').addEventListener('click', async (e) => {
     } catch (err) {
       toast('Modell konnte nicht geöffnet werden: ' + err.message, 'err');
     }
+  } else if (act === 'run') {
+    runFromBlock(cb);
   } else if (act === 'preview') {
     let html = code;
     if (cb.dataset.lang === 'svg' || (/^\s*<svg/i.test(code) && !/<html/i.test(code))) {
@@ -677,6 +679,361 @@ cv.addEventListener('drop', (e) => {
   dragDepth = 0;
   cv.classList.remove('dragging');
   if (e.dataTransfer.files.length) addFiles(e.dataTransfer.files);
+});
+
+// ======================================================================
+//              AUSFÜHREN: Spiele, Webseiten & Programme
+// ======================================================================
+const LANG_ALIAS = {
+  html: 'web', htm: 'web', svg: 'web',
+  javascript: 'javascript', js: 'javascript', node: 'javascript', mjs: 'javascript', jsx: null,
+  typescript: 'typescript', ts: 'typescript',
+  python: 'python', py: 'python', python3: 'python',
+  powershell: 'powershell', ps1: 'powershell', pwsh: 'powershell',
+  bat: 'batch', batch: 'batch', cmd: 'batch',
+  bash: 'bash', sh: 'bash', shell: 'bash',
+  java: 'java', go: 'go', golang: 'go', lua: 'lua', ruby: 'ruby', rb: 'ruby', php: 'php',
+  c: 'c', cpp: 'cpp', 'c++': 'cpp', cc: 'cpp', cxx: 'cpp', rust: 'rust', rs: 'rust',
+};
+const EXT_LANG = { html: 'web', htm: 'web', svg: 'web', js: 'javascript', mjs: 'javascript', ts: 'typescript', py: 'python', ps1: 'powershell', bat: 'batch', cmd: 'batch', sh: 'bash', java: 'java', go: 'go', lua: 'lua', rb: 'ruby', php: 'php', c: 'c', cpp: 'cpp', cc: 'cpp', rs: 'rust' };
+const LANG_EXT = { javascript: 'js', typescript: 'ts', python: 'py', powershell: 'ps1', batch: 'bat', bash: 'sh', java: 'java', go: 'go', lua: 'lua', ruby: 'rb', php: 'php', c: 'c', cpp: 'cpp', rust: 'rs' };
+const LANG_NAME = { web: 'HTML', webjs: 'JavaScript', javascript: 'JavaScript', typescript: 'TypeScript', python: 'Python', powershell: 'PowerShell', batch: 'Batch', bash: 'Bash', java: 'Java', go: 'Go', lua: 'Lua', ruby: 'Ruby', php: 'PHP', c: 'C', cpp: 'C++', rust: 'Rust' };
+
+// Was für eine Art Code ist das – und kann FORGE ihn ausführen?
+function runKind(lang, text, file) {
+  let k = LANG_ALIAS[lang];
+  if (k === undefined && file) k = EXT_LANG[(file.split('.').pop() || '').toLowerCase()];
+  if (!k) return null;
+  if (k === 'web') return /<(html|body|svg|canvas|div|script|h1|p|button|style)/i.test(text) ? 'web' : null;
+  // Browser-JavaScript (mit document/canvas) läuft in der Vorschau statt in Node
+  if (k === 'javascript' && /\b(document\.|window\.|getElementById|querySelector|requestAnimationFrame|getContext\()/.test(text)) return 'webjs';
+  return k;
+}
+
+const RUN = { id: null, mode: null, spec: null, url: null, errs: 0, runtimes: null };
+
+function rpShow(mode, lang, title) {
+  RUN.mode = mode;
+  $('#runPanel').hidden = false;
+  $('#runPanel').classList.toggle('proc', mode !== 'web');
+  $('#rpLang').textContent = LANG_NAME[lang] || lang;
+  $('#rpTitle').textContent = title || '';
+  $('#rpFrame').hidden = mode !== 'web';
+  $('#rpWindow').hidden = mode !== 'web';
+  $('#rpStop').hidden = mode === 'web';
+  $('#rpIn').hidden = mode === 'web';
+  $('#rpMsg').hidden = true;
+  rpClear();
+  const w = load('forge.rpWidth', 0);
+  if (w) $('#runPanel').style.width = w + 'px';
+}
+
+function rpStatus(t, cls = '') {
+  const el = $('#rpStatus');
+  el.textContent = t;
+  el.className = 'rp-status ' + cls;
+}
+
+function rpClear() {
+  $('#rpOut').innerHTML = '';
+  RUN.errs = 0;
+  $('#rpErrs').textContent = '';
+}
+
+let rpPending = [];
+let rpFlushT = null;
+function rpWrite(stream, text) {
+  text = String(text).replace(/\x1b\[[0-9;]*[A-Za-z]/g, '');
+  if (!text) return;
+  rpPending.push([stream, text]);
+  if (stream === 'stderr' || stream === 'error') {
+    RUN.errs++;
+    $('#rpErrs').textContent = `${RUN.errs} Fehler`;
+    if (RUN.mode === 'web') $('#runPanel').classList.add('con-open');
+  }
+  if (!rpFlushT) rpFlushT = setTimeout(rpFlush, 40);
+}
+function rpFlush() {
+  rpFlushT = null;
+  const out = $('#rpOut');
+  const stick = out.scrollHeight - out.scrollTop - out.clientHeight < 40;
+  const frag = document.createDocumentFragment();
+  for (const [stream, text] of rpPending) {
+    const sp = document.createElement('span');
+    sp.className = 'o-' + stream;
+    sp.textContent = stream === 'log' || stream === 'info' || stream === 'warn' || stream === 'error' ? text + '\n' : text;
+    frag.appendChild(sp);
+  }
+  rpPending = [];
+  out.appendChild(frag);
+  while (out.childNodes.length > 3000) out.removeChild(out.firstChild);
+  if (stick) out.scrollTop = out.scrollHeight;
+}
+
+// Alle Codeblöcke einer Antwort einsammeln – so funktionieren auch Projekte mit mehreren Dateien
+function filesFromMessage(cb) {
+  const msg = cb.closest('.msg');
+  const files = {};
+  for (const other of $$('.codeblock', msg)) {
+    if (other.dataset.file) files[other.dataset.file.split(/[\\/]/).pop()] = $('code', other).textContent;
+  }
+  return files;
+}
+
+function runFromBlock(cb) {
+  const code = $('code', cb).textContent;
+  const lang = cb.dataset.lang;
+  const file = cb.dataset.file ? cb.dataset.file.split(/[\\/]/).pop() : '';
+  const kind = runKind(lang, code, file);
+  if (!kind) return toast('Diesen Code kann FORGE nicht direkt ausführen.', 'err');
+  const files = filesFromMessage(cb);
+  const conv = currentConv();
+  const title = (conv && conv.title) || file || LANG_NAME[kind];
+  if (kind === 'web') {
+    let entry = file || 'index.html';
+    let html = code;
+    if (/^\s*<svg/i.test(code) && !/<html/i.test(code)) {
+      html = `<!doctype html><html><head><meta charset="utf-8"></head><body style="margin:0;display:grid;place-items:center;min-height:100vh;background:#fff">${code}</body></html>`;
+      entry = 'index.html';
+    }
+    files[entry] = html;
+    return runWeb({ files, entry }, title, 'web');
+  }
+  if (kind === 'webjs') {
+    const js = file || 'main.js';
+    files[js] = code;
+    if (!files['index.html']) {
+      files['index.html'] = `<!doctype html><html><head><meta charset="utf-8"><style>html,body{margin:0;height:100%;background:#111;color:#eee;font-family:system-ui,sans-serif}canvas{display:block}</style></head><body><canvas id="canvas" width="800" height="600"></canvas><canvas id="game" width="800" height="600" style="display:none"></canvas><script src="${js}"></script></body></html>`;
+    }
+    return runWeb({ files, entry: 'index.html' }, title, 'webjs');
+  }
+  const entry = file || 'main.' + LANG_EXT[kind];
+  files[entry] = code;
+  runProgram({ lang: kind, files, entry }, title);
+}
+
+async function runWeb(spec, title, lang = 'web') {
+  stopRun();
+  RUN.spec = { kind: 'web', spec, title, lang };
+  const { url } = await forge.run.preview(spec);
+  RUN.url = url;
+  rpShow('web', lang, title);
+  rpStatus('lädt …');
+  $('#rpFrame').src = url;
+  setTimeout(() => $('#rpFrame').focus(), 300);
+}
+
+async function getRuntimes(force) {
+  if (!RUN.runtimes || force) RUN.runtimes = await forge.run.runtimes(!!force);
+  return RUN.runtimes;
+}
+
+function confirmBox(title, html, ok = 'OK', withRemember = false) {
+  return new Promise((resolve) => {
+    $('#confirmBody').innerHTML = `<h2>${esc(title)}</h2>${html}
+      ${withRemember ? '<label class="remember"><input type="checkbox" id="cfRemember"> Nicht mehr fragen</label>' : ''}
+      <div class="actions"><button class="btn ghost" data-c="0">Abbrechen</button><button class="btn primary" data-c="1">${esc(ok)}</button></div>`;
+    $('#confirm').hidden = false;
+    const done = (v) => {
+      const rem = withRemember && $('#cfRemember') && $('#cfRemember').checked;
+      $('#confirm').hidden = true;
+      resolve(v ? { ok: true, remember: rem } : null);
+    };
+    $('#confirmBody').onclick = (e) => {
+      const b = e.target.closest('[data-c]');
+      if (b) done(b.dataset.c === '1');
+    };
+  });
+}
+
+async function runProgram(spec, title) {
+  const rts = await getRuntimes();
+  const rt = rts[spec.lang];
+  stopRun();
+  RUN.spec = { kind: 'proc', spec, title };
+  rpShow('proc', spec.lang, title);
+  if (!rt || !rt.available) return showMissing(spec.lang, rt);
+  if (!S.settings.runTrusted) {
+    const r = await confirmBox(
+      'Programm ausführen?',
+      `<p>Dieser ${esc(LANG_NAME[spec.lang])}-Code läuft direkt auf deinem PC – wie jedes andere Programm. Führe nur Code aus, dem du vertraust. Spiele und Webseiten (HTML) laufen dagegen abgeschottet in der Vorschau.</p>`,
+      'Ausführen',
+      true
+    );
+    if (!r) {
+      rpStatus('abgebrochen');
+      return;
+    }
+    if (r.remember) {
+      S.settings.runTrusted = true;
+      saveSettings();
+    }
+  }
+  const id = uid();
+  RUN.id = id;
+  rpStatus('läuft …', 'run');
+  $('#rpInput').disabled = false;
+  $('#rpInput').focus();
+  const res = await forge.run.start({ id, ...spec });
+  if (!res.ok) {
+    RUN.id = null;
+    if (res.error.startsWith('MISSING:')) return showMissing(spec.lang, rt);
+    rpWrite('stderr', res.error + '\n');
+    rpStatus('Fehler', 'err');
+  }
+}
+
+function showMissing(lang, rt) {
+  const name = LANG_NAME[lang] || lang;
+  $('#rpMsg').hidden = false;
+  $('#rpMsg').innerHTML = `<div class="rp-missing"><div class="rp-big">🧩</div><h3>${esc(name)} ist auf deinem PC nicht installiert</h3>
+    <p>Damit FORGE ${esc(name)}-Code ausführen kann, muss ${esc(name)} einmal installiert werden.${rt && rt.winget ? ' Mit einem Klick geht das automatisch über Windows (winget).' : ''}</p>
+    <div class="actions" style="justify-content:center">
+      ${rt && rt.winget ? `<button class="btn primary" data-m="install">${esc(name)} installieren</button>` : rt && rt.url ? `<button class="btn primary" data-m="install">Download-Seite öffnen</button>` : ''}
+      <button class="btn" data-m="recheck">Nochmal prüfen</button>
+    </div>
+    <p class="muted small">Tipp: Spiele als HTML-Datei laufen immer sofort – frag den Coder einfach nach einer HTML-Version.</p></div>`;
+  rpStatus('fehlt', 'err');
+  $('#rpMsg').onclick = async (e) => {
+    const b = e.target.closest('[data-m]');
+    if (!b) return;
+    if (b.dataset.m === 'install') {
+      await forge.run.install(lang);
+      toast('Installation gestartet – danach auf „Nochmal prüfen“ klicken', 'ok');
+    } else {
+      b.disabled = true;
+      b.textContent = 'Prüfe …';
+      const rts = await getRuntimes(true);
+      if (rts[lang] && rts[lang].available) {
+        toast(`${name} gefunden!`, 'ok');
+        runProgram(RUN.spec.spec, RUN.spec.title);
+      } else {
+        b.disabled = false;
+        b.textContent = 'Nochmal prüfen';
+        toast(`${name} noch nicht gefunden. Nach der Installation hilft manchmal ein Neustart von FORGE.`, 'err');
+      }
+    }
+  };
+}
+
+function stopRun() {
+  if (RUN.id) forge.run.stop(RUN.id);
+  RUN.id = null;
+  if (RUN.mode === 'web') $('#rpFrame').src = 'about:blank';
+}
+
+forge.run.onEvent((id, type, data) => {
+  if (id !== RUN.id) return;
+  if (type === 'out') {
+    rpWrite(data.stream, data.text);
+    // Fehlendes Python-Paket? Anbieten, es zu installieren
+    const m = data.stream === 'stderr' && /No module named '([\w.]+)'/.exec(data.text);
+    if (m && RUN.spec && RUN.spec.spec && RUN.spec.spec.lang === 'python') offerPip(m[1].split('.')[0]);
+  } else if (type === 'exit') {
+    RUN.id = null;
+    $('#rpInput').disabled = true;
+    if (data.pip) {
+      if (data.code === 0) {
+        rpWrite('info', `\n✓ ${data.pip} installiert – starte das Programm neu …\n`);
+        setTimeout(() => runProgram(RUN.spec.spec, RUN.spec.title), 600);
+      } else rpWrite('stderr', `\nInstallation von ${data.pip} fehlgeschlagen.\n`);
+      return;
+    }
+    const ok = data.code === 0;
+    rpStatus(data.compileFailed ? 'Kompilieren fehlgeschlagen' : ok ? 'fertig' : `beendet (Code ${data.code ?? data.signal})`, ok ? 'ok' : 'err');
+    rpWrite('info', `\n— Programm beendet${ok ? '' : ' mit Code ' + (data.code ?? data.signal)} —\n`);
+  }
+});
+
+function offerPip(module) {
+  if ($('#rpOut .pip-offer')) return;
+  const b = document.createElement('button');
+  b.className = 'btn sm primary pip-offer';
+  b.textContent = `📦 ${module} installieren und neu starten`;
+  b.onclick = async () => {
+    b.remove();
+    const id = uid();
+    RUN.id = id;
+    rpStatus('installiere …', 'run');
+    const r = await forge.run.pip(id, module);
+    if (!r.ok) rpWrite('stderr', r.error + '\n');
+  };
+  rpFlush();
+  $('#rpOut').appendChild(b);
+}
+
+// Meldungen aus der Vorschau (console.log, Fehler)
+window.addEventListener('message', (e) => {
+  if (!e.data || !e.data.__forge || e.source !== $('#rpFrame').contentWindow) return;
+  if (e.data.type === 'ready') return rpStatus('läuft', 'ok');
+  rpWrite(e.data.type, e.data.text);
+});
+$('#rpFrame').addEventListener('load', () => {
+  if (RUN.mode === 'web' && $('#rpFrame').src !== 'about:blank') rpStatus('läuft', 'ok');
+});
+
+$('#rpIn').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const v = $('#rpInput').value;
+  if (!RUN.id) return;
+  forge.run.input(RUN.id, v);
+  rpWrite('input', v + '\n');
+  $('#rpInput').value = '';
+});
+$('#rpClear').addEventListener('click', rpClear);
+$('#rpConHead').addEventListener('click', (e) => {
+  if (e.target.closest('button') || RUN.mode !== 'web') return;
+  $('#runPanel').classList.toggle('con-open');
+});
+$('#rpRestart').addEventListener('click', () => {
+  const r = RUN.spec;
+  if (!r) return;
+  if (r.kind === 'web') runWeb(r.spec, r.title, r.lang);
+  else runProgram(r.spec, r.title);
+});
+$('#rpStop').addEventListener('click', () => {
+  if (RUN.id) forge.run.stop(RUN.id);
+});
+$('#rpClose').addEventListener('click', () => {
+  stopRun();
+  $('#runPanel').hidden = true;
+  $('#runPanel').classList.remove('max', 'con-open');
+});
+$('#rpFull').addEventListener('click', () => {
+  if (RUN.mode === 'web') {
+    const f = $('#rpFrame');
+    if (f.requestFullscreen) f.requestFullscreen().catch(() => $('#runPanel').classList.toggle('max'));
+  } else $('#runPanel').classList.toggle('max');
+});
+$('#rpWindow').addEventListener('click', () => RUN.url && forge.run.previewWindow(RUN.url));
+$('#rpOpen').addEventListener('click', async () => {
+  const f = await forge.run.openFile();
+  if (!f) return;
+  const ext = (f.name.split('.').pop() || '').toLowerCase();
+  const kind = EXT_LANG[ext];
+  if (!kind) return toast('Diesen Dateityp kann FORGE nicht ausführen.', 'err');
+  if (kind === 'web') return runWeb({ files: {}, entry: f.name, baseDir: f.dir }, f.name);
+  runProgram({ lang: kind, files: {}, entry: f.name, cwd: f.dir }, f.name);
+});
+// Panel-Breite mit der Maus ändern
+$('#rpDrag').addEventListener('mousedown', (e) => {
+  e.preventDefault();
+  const panel = $('#runPanel');
+  const total = $('#codeView').clientWidth;
+  document.body.classList.add('resizing');
+  const move = (ev) => {
+    const right = $('#codeView').getBoundingClientRect().right;
+    const w = Math.min(Math.max(right - ev.clientX, 320), total - 380);
+    panel.style.width = w + 'px';
+  };
+  const up = () => {
+    document.body.classList.remove('resizing');
+    store('forge.rpWidth', parseInt(panel.style.width, 10));
+    removeEventListener('mousemove', move);
+    removeEventListener('mouseup', up);
+  };
+  addEventListener('mousemove', move);
+  addEventListener('mouseup', up);
 });
 
 // ======================================================================
