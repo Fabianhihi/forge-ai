@@ -1,0 +1,60 @@
+# Baut das Bild-Verständnis-Paket für FORGE AI (Windows, Vulkan): llama-mtmd-cli von llama.cpp.
+# FORGE lädt es einmal automatisch, wenn du der KI zum ersten Mal ein Bild gibst.
+# Neu bauen: in runtimes/vision.json den "tag" erhöhen und in vision.js (VISION_PACK) anpassen.
+name: Vision-Paket bauen
+
+on:
+  push:
+    branches: [main]
+    paths: ['runtimes/vision.json']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: llama.cpp für Windows holen
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          TAG=$(jq -r .tag runtimes/vision.json)
+          SRC=$(jq -r .source runtimes/vision.json)
+          SUFFIX=$(jq -r .asset runtimes/vision.json)
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG gibt es schon."
+            exit 0
+          fi
+          gh api "repos/$SRC/releases/latest" > rel.json
+          URL=$(python3 -c "
+          import json
+          r = json.load(open('rel.json'))
+          a = [x['browser_download_url'] for x in r['assets'] if x['name'].endswith('$SUFFIX')]
+          print(a[0] if a else '')
+          ")
+          if [ -z "$URL" ]; then echo "Kein passendes Paket gefunden"; jq -r '.assets[].name' rel.json; exit 1; fi
+          echo "llama.cpp: $URL"
+          curl -fsSL "$URL" -o llama.zip
+          mkdir -p x pack/vision
+          unzip -q llama.zip -d x
+          EXE=$(find x -iname 'llama-mtmd-cli.exe' | head -1)
+          if [ -z "$EXE" ]; then echo "llama-mtmd-cli.exe fehlt"; find x -name '*.exe' | head -50; exit 1; fi
+          DIR=$(dirname "$EXE")
+          cp "$EXE" pack/vision/
+          cp "$DIR"/*.dll pack/vision/
+          find x -maxdepth 2 -iname 'LICENSE*' -exec cp {} pack/vision/ \; || true
+          printf '{"tag":"%s","llama":"%s"}\n' "$TAG" "$(basename "$URL")" > pack/vision/forge-vision.json
+          ls -la pack/vision
+          (cd pack && zip -qr -9 ../forge-vision-win64.zip vision)
+          SHA=$(sha256sum forge-vision-win64.zip | cut -d' ' -f1)
+          SIZE=$(stat -c %s forge-vision-win64.zip)
+          printf '{"tag":"%s","file":"forge-vision-win64.zip","sha256":"%s","size":%s}\n' "$TAG" "$SHA" "$SIZE" > forge-vision-win64.json
+          cat forge-vision-win64.json
+          gh release create "$TAG" forge-vision-win64.zip forge-vision-win64.json \
+            --title "FORGE-Vision ($TAG)" \
+            --notes "Bild-Verständnis für FORGE AI (llama.cpp mtmd, Windows, Vulkan). Wird von FORGE automatisch geladen." \
+            --latest=false

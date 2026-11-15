@@ -1,0 +1,5 @@
+{
+  "tag": "vision-1",
+  "source": "ggml-org/llama.cpp",
+  "asset": "-bin-win-vulkan-x64.zip"
+}
