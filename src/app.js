@@ -173,6 +173,61 @@ function onEngine(st) {
   }
 }
 
+// ---------- Speicherplatz: eigene Dateien von FORGE aufräumen ----------
+let storageBusy = false;
+function refreshStorage() {
+  if (storageBusy) return;
+  storageBusy = true;
+  forge.engine
+    .storage()
+    .then((info) => {
+      S.storage = { ...info, at: Date.now() };
+      renderUpgrade();
+    })
+    .catch(() => {})
+    .finally(() => (storageBusy = false));
+}
+function fileLabel(it) {
+  if (it.part) return `Halber Download „${it.title}“`;
+  return `Modell „${it.title}“`;
+}
+// Was kann für den Download des neuen Modells weg? Erst halbe Downloads, dann Modelle, die das neue ersetzt.
+function cleanupPlan(bg) {
+  const info = S.storage;
+  if (!info || Date.now() - info.at > 60000) return null;
+  const target = S.engine.catalog.find((c) => c.id === bg.id) || {};
+  const replaces = (id) => {
+    const c = S.engine.catalog.find((x) => x.id === id);
+    if (!c) return false;
+    const bots = target.bots || ['code', 'design'];
+    return (c.usedBy || []).every((b) => bots.includes(b));
+  };
+  const cands = info.items
+    .filter((it) => it.removable && it.id !== bg.id && (it.part || !it.usedByBot || replaces(it.id)))
+    .sort((a, b) => b.part - a.part || b.bytes - a.bytes);
+  const needGB = bg.nospace.needGB;
+  const freeGB = info.free != null ? info.free : bg.nospace.freeGB;
+  const files = [];
+  let freed = 0;
+  for (const it of cands) {
+    if (freeGB + freed / 1024 ** 3 >= needGB + 0.3) break;
+    files.push({ file: it.file, bytes: it.bytes, label: fileLabel(it) + (it.part ? '' : ' (wird ersetzt)') });
+    freed += it.bytes;
+  }
+  return { files, needGB, freeGB, freedGB: freed / 1024 ** 3 };
+}
+// Nach dem Wechsel: Modelle, die kein Bot mehr benutzt, und halbe Downloads
+function oldModels() {
+  const info = S.storage;
+  const since = (S.engine.upgradeReady && S.engine.upgradeReady.at) || 0;
+  if (!info || info.at < since + 1500) {
+    refreshStorage();
+    return [];
+  }
+  const bgId = S.engine.bgDownload && S.engine.bgDownload.id;
+  return info.items.filter((it) => it.removable && !it.usedByBot && it.id !== bgId).map((it) => ({ file: it.file, bytes: it.bytes, label: fileLabel(it) }));
+}
+
 // ---------- Profi-Modell (Qwen3.6): Angebot + Hintergrund-Download ----------
 const fmtGB = (b) => (b / 1e9).toFixed(1).replace('.', ',');
 function renderUpgrade() {
@@ -192,8 +247,29 @@ function renderUpgrade() {
   }
   const up = auto || null;
   let html = '';
-  if (bg && bg.error) {
+  if (bg && bg.error && bg.nospace) {
+    // Zu wenig Platz: zeigen, was FORGE selbst löschen kann
+    const plan = cleanupPlan(bg);
+    if (!plan) {
+      refreshStorage();
+      html = `<div class="ub-title">⚠ Zu wenig Speicherplatz</div><div class="ub-text">Prüfe, was FORGE aufräumen kann …</div>`;
+    } else {
+      const list = plan.files.map((f) => `<li>${esc(f.label)} <span>${fmtGB(f.bytes)} GB</span></li>`).join('');
+      const missing = Math.max(0, plan.needGB - plan.freeGB - plan.freedGB);
+      html = `<div class="ub-title">⚠ Zu wenig Speicherplatz</div><div class="ub-text">Für den neuen Coder fehlen ${String((plan.needGB - plan.freeGB).toFixed(1)).replace('.', ',')} GB.${
+        plan.files.length ? ' FORGE kann diese eigenen Dateien löschen:' : ''
+      }</div>${list ? `<ul class="ub-list">${list}</ul>` : ''}${
+        missing > 0.05 ? `<div class="ub-text">Danach fehlen immer noch ${String(missing.toFixed(1)).replace('.', ',')} GB – lösche bitte noch andere Dateien auf dem Laufwerk und klick dann auf „Nochmal“.</div>` : ''
+      }<div class="ub-actions">${plan.files.length && missing <= 0.05 ? `<button class="btn sm primary" data-up="clean">Platz schaffen &amp; weiterladen</button>` : ''}<button class="btn sm${plan.files.length && missing <= 0.05 ? ' ghost' : ' primary'}" data-up="start">Nochmal</button><button class="btn sm ghost" data-up="cancel">Abbrechen</button></div>`;
+    }
+  } else if (bg && bg.error) {
     html = `<div class="ub-title">⚠ Download vom neuen Coder unterbrochen</div><div class="ub-text">${esc(bg.error)}</div><div class="ub-actions"><button class="btn sm primary" data-up="start">Weiter laden</button><button class="btn sm ghost" data-up="cancel">Abbrechen</button></div>`;
+  } else if (!bg && st.upgradeReady && oldModels().length && localStorage.getItem('forge.cleanup.done') !== String(st.upgradeReady.at)) {
+    const old = oldModels();
+    const total = old.reduce((n, f) => n + f.bytes, 0);
+    html = `<div class="ub-title">🧹 Alte Modelle aufräumen?</div><div class="ub-text">Diese Dateien braucht FORGE nicht mehr:</div><ul class="ub-list">${old
+      .map((f) => `<li>${esc(f.label)} <span>${fmtGB(f.bytes)} GB</span></li>`)
+      .join('')}</ul><div class="ub-actions"><button class="btn sm primary" data-up="cleanold">Löschen (${fmtGB(total)} GB frei)</button><button class="btn sm ghost" data-up="keepold">Behalten</button></div>`;
   } else if (bg) {
     const pct = dlPct(bg);
     const left = bg.speed > 0 ? Math.max(1, Math.round((bg.total - bg.received) / bg.speed / 60)) : null;
@@ -220,12 +296,32 @@ $('#upgradeBar').addEventListener('click', async (e) => {
   const up = S.engine.catalog.find((c) => c.id === bgId) || S.engine.catalog.find((c) => c.upgrade && c.autoUpgrade && !c.installed);
   if (b.dataset.up === 'start' && up) {
     localStorage.removeItem('forge.upgrade.dismissed');
+    S.storage = null;
     const r = await forge.engine.bgDownload(up.id);
     if (r && r.ok === false) toast(r.error || 'Download konnte nicht starten', 'err');
   } else if (b.dataset.up === 'cancel') {
     if (up) localStorage.setItem('forge.upgrade.dismissed', up.id);
     forge.engine.bgCancel();
     toast('Download abgebrochen – der bisher geladene Teil bleibt gespeichert. Du kannst ihn später im Modell-Menü fortsetzen.');
+  } else if (b.dataset.up === 'clean' && up) {
+    const plan = cleanupPlan(S.engine.bgDownload);
+    if (!plan) return;
+    b.disabled = true;
+    const r = await forge.engine.freeSpace(plan.files.map((f) => f.file));
+    toast(`🧹 ${fmtGB(r.freedGB * 1024 ** 3)} GB frei gemacht – lade weiter …`, 'ok');
+    S.storage = null;
+    forge.engine.bgDownload(up.id);
+  } else if (b.dataset.up === 'cleanold') {
+    const old = oldModels();
+    b.disabled = true;
+    const r = await forge.engine.freeSpace(old.map((f) => f.file));
+    localStorage.setItem('forge.cleanup.done', String(S.engine.upgradeReady && S.engine.upgradeReady.at));
+    toast(`🧹 ${fmtGB(r.freedGB * 1024 ** 3)} GB frei gemacht.`, 'ok');
+    S.storage = null;
+    renderUpgrade();
+  } else if (b.dataset.up === 'keepold') {
+    localStorage.setItem('forge.cleanup.done', String(S.engine.upgradeReady && S.engine.upgradeReady.at));
+    renderUpgrade();
   } else if (b.dataset.up === 'later' && up) {
     localStorage.setItem('forge.upgrade.dismissed', up.id);
     renderUpgrade();

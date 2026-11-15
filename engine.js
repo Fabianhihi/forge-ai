@@ -225,6 +225,11 @@ class Engine extends EventEmitter {
   }
 
   freeDiskGB() {
+    if (process.env.FORGE_TEST_DISK) {
+      try {
+        return Number(fs.readFileSync(process.env.FORGE_TEST_DISK, 'utf8')); // nur für Tests
+      } catch {}
+    }
     try {
       const s = fs.statfsSync(this.modelsDir);
       return (s.bavail * s.bsize) / GB;
@@ -307,6 +312,7 @@ class Engine extends EventEmitter {
         thinks: !!c.thinks,
         upgrade: !!(c.upgrade && hw && (this.state.hardware.ramGB || 0) >= (c.minRamGB || 0) && ((this.state.hardware.gpu && this.state.hardware.vramGB) || 0) >= (c.minVramGB || 0)),
         autoUpgrade: !!c.autoUpgrade,
+        bots: c.bots || null,
         usedBy: BOTS.filter((b) => botModels[b] === c.id),
       })),
     };
@@ -511,7 +517,13 @@ class Engine extends EventEmitter {
           this.set({ bgDownload: null });
         } else {
           this.log('warn', 'Hintergrund-Download fehlgeschlagen: ' + (err && err.message));
-          this.set({ bgDownload: { ...(this.state.bgDownload || { id: entry.id, title: entry.title, params: entry.params }), error: friendly(err) } });
+          this.set({
+            bgDownload: {
+              ...(this.state.bgDownload || { id: entry.id, title: entry.title, params: entry.params }),
+              error: friendly(err),
+              nospace: err && err.code === 'NOSPACE' ? { needGB: err.needGB, freeGB: err.freeGB } : null,
+            },
+          });
         }
       })
       .finally(() => {
@@ -551,6 +563,61 @@ class Engine extends EventEmitter {
     }, 3000);
   }
 
+  // ---------- Speicherplatz: was FORGE selbst wieder freigeben kann ----------
+  storageInfo() {
+    const items = [];
+    const busyIds = new Set([this.state.download && this.state.download.id, this.bgJob && this.config.bgDownloadId].filter(Boolean));
+    const used = new Set(BOTS.map((b) => this.modelIdForBot(b)));
+    let files = [];
+    try {
+      files = fs.readdirSync(this.modelsDir);
+    } catch {}
+    for (const f of files) {
+      const full = path.join(this.modelsDir, f);
+      let bytes = 0;
+      try {
+        bytes = fs.statSync(full).size;
+      } catch {
+        continue;
+      }
+      const entry = CATALOG.find((c) => c.file === f || c.file + '.part' === f);
+      const isPart = f.endsWith('.part');
+      if (entry && busyIds.has(entry.id) && isPart) continue; // läuft gerade
+      if (!isPart && !/\.gguf$/i.test(f)) continue;
+      const loaded = !isPart && this.loadedPath === full;
+      items.push({
+        file: f,
+        id: entry ? entry.id : null,
+        title: entry ? `${entry.title} ${entry.params}` : f,
+        bytes,
+        part: isPart,
+        loaded,
+        usedByBot: !isPart && !!entry && used.has(entry.id),
+        removable: !loaded,
+      });
+    }
+    return { free: this.freeDiskGB(), dir: this.modelsDir, items };
+  }
+
+  // Ausgewählte Dateien löschen (nur im Modell-Ordner, nie das geladene Modell oder einen laufenden Download)
+  freeSpace(fileNames) {
+    const info = this.storageInfo();
+    let freed = 0;
+    for (const name of fileNames || []) {
+      const it = info.items.find((i) => i.file === name && i.removable);
+      if (!it) continue;
+      try {
+        fs.rmSync(path.join(this.modelsDir, it.file), { force: true });
+        freed += it.bytes;
+        this.log('info', `Platz geschaffen: ${it.file} (${(it.bytes / GB).toFixed(1)} GB) gelöscht`);
+      } catch (err) {
+        this.log('warn', `Löschen fehlgeschlagen: ${it.file}: ${err.message}`);
+      }
+    }
+    this.set({});
+    return { freedGB: freed / GB, free: this.freeDiskGB() };
+  }
+
   // ---------- Download mit Fortsetzen ----------
   async download(entry, run, { background = false } = {}) {
     const dest = this.modelPath(entry);
@@ -561,7 +628,12 @@ class Engine extends EventEmitter {
       have = fs.statSync(part).size;
     } catch {}
     if (free != null && (entry.size - have) / GB + 0.5 > free) {
-      throw new Error(`Nicht genug Speicherplatz: ${entry.title}-Modell braucht ${(entry.size / GB).toFixed(1)} GB, frei sind ${free.toFixed(1)} GB.`);
+      const needGB = (entry.size - have) / GB + 0.5;
+      throw Object.assign(new Error(`Nicht genug Speicherplatz: ${entry.title}-Modell braucht ${(entry.size / GB).toFixed(1)} GB, frei sind ${free.toFixed(1)} GB.`), {
+        code: 'NOSPACE',
+        needGB,
+        freeGB: free,
+      });
     }
     const ac = new AbortController();
     if (background) this.bgAbort = ac;

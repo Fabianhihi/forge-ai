@@ -1,10 +1,10 @@
 {
-  "version": "1.13.0",
+  "version": "1.13.1",
   "runtime": "electron-45.3.2+nlc-3.22.3",
-  "notes": "Neu in 1.13.0: Sparsamer Coder! Qwen3.5 (9B) läuft komplett auf deiner 8-GB-Grafikkarte und braucht kaum Arbeitsspeicher – deutlich besser als der alte 7B-Coder und denkt vor dem Antworten nach. Er lädt sich einmal im Hintergrund (5,7 GB) und wird danach von allen Bots benutzt. Der große 22-GB-Download aus 1.12 wird dafür gestoppt (der Profi bleibt optional im Modell-Menü).",
+  "notes": "Neu in 1.13.1: FORGE räumt selbst auf. Ist zu wenig Speicherplatz für ein Modell frei, zeigt FORGE, welche eigenen Dateien weg können (halbe Downloads, Modelle, die ersetzt werden) – ein Klick schafft Platz und lädt weiter. Nach dem Wechsel auf ein neues Modell bietet FORGE an, alte Modelle zu löschen.",
   "app": {
-    "file": "forge-app-1.13.0.json.gz",
-    "sha256": "402d7fcbea2a196321535b753379a907a78da2fab157bf9d94daaf7f56e5ca1f",
-    "size": 563747
+    "file": "forge-app-1.13.1.json.gz",
+    "sha256": "0c12b82b0d16cee3b6ce1a76ed9e10bd52a87a46f78e64a91bf45ea061b23ad9",
+    "size": 566674
   }
 }
