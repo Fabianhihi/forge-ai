@@ -158,7 +158,7 @@ function onEngine(st) {
   if (st.memNote && st.status === 'ready' && (!S.engine || S.engine.memNote !== st.memNote)) toast(st.memNote);
   const prevUp = S.engine && S.engine.upgradeReady;
   S.engine = st;
-  if (st.upgradeReady && (!prevUp || prevUp.at !== st.upgradeReady.at)) toast(`🚀 Der Profi-Coder (${st.upgradeReady.params}) ist bereit – Coder und 3D-Designer benutzen ihn ab jetzt.`, 'ok');
+  if (st.upgradeReady && (!prevUp || prevUp.at !== st.upgradeReady.at)) toast(`🚀 ${st.upgradeReady.title} (${st.upgradeReady.params}) ist bereit – ${st.upgradeReady.bots && st.upgradeReady.bots.includes('chat') ? 'alle Bots benutzen' : 'Coder und 3D-Designer benutzen'} es ab jetzt.`, 'ok');
   if (S.waitingAi && S.waitingAi.m.waiting) fillAi(S.waitingAi.el, S.waitingAi.m, false, true);
   renderUpgrade();
   renderStatus();
@@ -179,22 +179,33 @@ function renderUpgrade() {
   const st = S.engine;
   const bar = $('#upgradeBar');
   if (!st || !st.catalog) return (bar.hidden = true);
-  const up = st.catalog.find((c) => c.upgrade);
   const bg = st.bgDownload;
+  // Sparsames Modell (passt komplett auf die Grafikkarte) wird einmal automatisch geholt
+  const auto = st.catalog.find((c) => c.upgrade && c.autoUpgrade && !c.installed);
+  // Läuft noch der große Profi-Download aus 1.12? Für den sparsamen Coder stoppen (Teil bleibt gespeichert)
+  if (auto && bg && bg.id !== auto.id && !bg.error && !localStorage.getItem('forge.upgrade.switched.' + auto.id)) {
+    localStorage.setItem('forge.upgrade.switched.' + auto.id, '1');
+    localStorage.setItem('forge.upgrade.dismissed', bg.id);
+    forge.engine.bgCancel().then(() => setTimeout(() => forge.engine.bgDownload(auto.id), 800));
+    toast(`Großer Download gestoppt – du bekommst stattdessen den sparsamen Coder (${fmtGB(auto.size)} GB), der fast keinen Arbeitsspeicher braucht.`);
+    return;
+  }
+  const up = auto || null;
   let html = '';
   if (bg && bg.error) {
-    html = `<div class="ub-title">⚠ Download vom Profi-Coder unterbrochen</div><div class="ub-text">${esc(bg.error)}</div><div class="ub-actions"><button class="btn sm primary" data-up="start">Weiter laden</button><button class="btn sm ghost" data-up="cancel">Abbrechen</button></div>`;
+    html = `<div class="ub-title">⚠ Download vom neuen Coder unterbrochen</div><div class="ub-text">${esc(bg.error)}</div><div class="ub-actions"><button class="btn sm primary" data-up="start">Weiter laden</button><button class="btn sm ghost" data-up="cancel">Abbrechen</button></div>`;
   } else if (bg) {
     const pct = dlPct(bg);
     const left = bg.speed > 0 ? Math.max(1, Math.round((bg.total - bg.received) / bg.speed / 60)) : null;
-    html = `<div class="ub-title">🚀 Lade den Profi-Coder … ${pct} %</div><div class="ub-prog"><i style="width:${pct}%"></i></div><div class="ub-text">${fmtGB(bg.received || 0)} von ${fmtGB(bg.total || 0)} GB${left ? ` · noch ca. ${left} min` : ''}<br>Du kannst währenddessen ganz normal weiterarbeiten.</div><div class="ub-actions"><button class="btn sm ghost" data-up="cancel">Abbrechen</button></div>`;
+    const nm = (st.catalog.find((c) => c.id === bg.id) || {}).title || 'neuen Coder';
+    html = `<div class="ub-title">🚀 Lade den ${esc(nm)}-Coder (${esc(bg.params || '')}) … ${pct} %</div><div class="ub-prog"><i style="width:${pct}%"></i></div><div class="ub-text">${fmtGB(bg.received || 0)} von ${fmtGB(bg.total || 0)} GB${left ? ` · noch ca. ${left} min` : ''}<br>Du kannst währenddessen ganz normal weiterarbeiten.</div><div class="ub-actions"><button class="btn sm ghost" data-up="cancel">Abbrechen</button></div>`;
   } else if (up && !up.installed && localStorage.getItem('forge.upgrade.dismissed') !== up.id) {
     // Einmal automatisch starten (der Nutzer hat sich das stärkere Modell gewünscht), danach nur noch anbieten
     if (st.status === 'ready' && !localStorage.getItem('forge.upgrade.auto.' + up.id)) {
       localStorage.setItem('forge.upgrade.auto.' + up.id, '1');
       forge.engine.bgDownload(up.id);
     }
-    html = `<div class="ub-title">🚀 Profi-Coder verfügbar</div><div class="ub-text">Qwen3.6 (${up.params}) – viel besserer Code, denkt vor dem Antworten nach. Einmal ${fmtGB(up.size)} GB laden, im Hintergrund.</div><div class="ub-actions"><button class="btn sm primary" data-up="start">Im Hintergrund laden</button><button class="btn sm ghost" data-up="later">Später</button></div>`;
+    html = `<div class="ub-title">🚀 Neuer Coder verfügbar: ${esc(up.title)} (${esc(up.params)})</div><div class="ub-text">Besserer Code, läuft komplett auf der Grafikkarte und braucht kaum Arbeitsspeicher. Einmal ${fmtGB(up.size)} GB laden, im Hintergrund.</div><div class="ub-actions"><button class="btn sm primary" data-up="start">Im Hintergrund laden</button><button class="btn sm ghost" data-up="later">Später</button></div>`;
   }
   bar.hidden = !html;
   if (bar.dataset.html !== html) {
@@ -205,7 +216,8 @@ function renderUpgrade() {
 $('#upgradeBar').addEventListener('click', async (e) => {
   const b = e.target.closest('[data-up]');
   if (!b) return;
-  const up = S.engine.catalog.find((c) => c.upgrade);
+  const bgId = S.engine.bgDownload && S.engine.bgDownload.id;
+  const up = S.engine.catalog.find((c) => c.id === bgId) || S.engine.catalog.find((c) => c.upgrade && c.autoUpgrade && !c.installed);
   if (b.dataset.up === 'start' && up) {
     localStorage.removeItem('forge.upgrade.dismissed');
     const r = await forge.engine.bgDownload(up.id);
@@ -2134,7 +2146,7 @@ function openSettings() {
     <p>Alles bleibt auf deinem PC.</p>
     <div class="field"><label>Name deiner KI</label><input id="sName" maxlength="24" value="${esc(st.aiName)}"></div>
     <div class="two">
-      <div class="field"><label>💭 Nachdenken vor dem Antworten <span class="hint" style="display:inline">(nur Profi-Coder Qwen3.6)</span></label><select id="sThink"><option value="off" ${st.think === 'off' ? 'selected' : ''}>Aus – am schnellsten</option><option value="short" ${!st.think || st.think === 'short' ? 'selected' : ''}>Kurz – guter Mittelweg (empfohlen)</option><option value="deep" ${st.think === 'deep' ? 'selected' : ''}>Gründlich – langsamer, beste Ergebnisse</option></select></div>
+      <div class="field"><label>💭 Nachdenken vor dem Antworten <span class="hint" style="display:inline">(Qwen3.5/3.6-Modelle)</span></label><select id="sThink"><option value="off" ${st.think === 'off' ? 'selected' : ''}>Aus – am schnellsten</option><option value="short" ${!st.think || st.think === 'short' ? 'selected' : ''}>Kurz – guter Mittelweg (empfohlen)</option><option value="deep" ${st.think === 'deep' ? 'selected' : ''}>Gründlich – langsamer, beste Ergebnisse</option></select></div>
       <div class="field"><label>Kreativität: <span id="tVal">${String(st.temperature).replace('.', ',')}</span></label><input id="sTemp" type="range" min="0" max="1.2" step="0.05" value="${st.temperature}"><span class="hint">Niedrig = genauer Code, hoch = kreativer</span></div>
       <div class="field"><label>Gedächtnis (Kontext)</label><select id="sCtx">${[4096, 8192, 16384, 32768]
         .map((n) => `<option value="${n}" ${n === ctx ? 'selected' : ''}>${n.toLocaleString('de-DE')} Token${n === 8192 ? ' (empfohlen)' : n === 4096 ? ' (spart Speicher)' : ''}</option>`)

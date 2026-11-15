@@ -26,7 +26,7 @@ const CATALOG = [
   {
     id: 'standard',
     kind: 'code',
-    title: 'Empfohlen',
+    title: 'Klassisch',
     params: '7B',
     file: 'Qwen2.5-Coder-7B-Instruct-Q4_K_M.gguf',
     size: 4.68e9,
@@ -63,6 +63,25 @@ const CATALOG = [
     ],
   },
   {
+    id: 'effizient',
+    kind: 'code',
+    title: 'Effizient',
+    params: '9B',
+    file: 'Qwen3.5-9B-Q4_K_M.gguf',
+    size: 5.68e9,
+    ctx: 16384,
+    thinks: true,
+    upgrade: true,
+    autoUpgrade: true,
+    minVramGB: 7,
+    bots: ['chat', 'code', 'design'],
+    desc: 'Qwen3.5 – läuft komplett auf der Grafikkarte (8 GB) und braucht kaum Arbeitsspeicher. Denkt vor dem Antworten nach. Beste Wahl für 8-GB-Grafikkarten.',
+    urls: [
+      hf('unsloth/Qwen3.5-9B-GGUF', 'Qwen3.5-9B-Q4_K_M.gguf'),
+      hf('bartowski/Qwen_Qwen3.5-9B-GGUF', 'Qwen_Qwen3.5-9B-Q4_K_M.gguf'),
+    ],
+  },
+  {
     id: 'profi',
     kind: 'code',
     title: 'Profi',
@@ -73,7 +92,7 @@ const CATALOG = [
     thinks: true,
     upgrade: true,
     minRamGB: 28,
-    desc: 'Qwen3.6 – das stärkste Coding-Modell, das auf deinem PC läuft. Denkt vor dem Antworten nach. Braucht 32 GB RAM (läuft teils im Arbeitsspeicher).',
+    desc: 'Qwen3.6 – das stärkste Coding-Modell für deinen PC, aber groß: belegt ca. 15 GB Arbeitsspeicher und ist langsamer. Denkt vor dem Antworten nach.',
     urls: [
       hf('unsloth/Qwen3.6-35B-A3B-GGUF', 'Qwen3.6-35B-A3B-UD-Q4_K_M.gguf'),
       hf('bartowski/Qwen_Qwen3.6-35B-A3B-GGUF', 'Qwen_Qwen3.6-35B-A3B-Q4_K_M.gguf'),
@@ -124,6 +143,7 @@ const CATALOG = [
 // Nur für Tests: kleine Modelle per Umgebungsvariable einspielen
 if (process.env.FORGE_TEST_MODEL) {
   CATALOG.unshift({ id: 'test', kind: 'code', title: 'Test-Coder', params: 'tiny', file: 'tiny-test.gguf', size: 84018656, desc: 'Testmodell', urls: [process.env.FORGE_TEST_MODEL] });
+  if (process.env.FORGE_TEST_AUTOUP) CATALOG.push({ id: 'test-eff', kind: 'code', title: 'Test-Effizient', params: 'tiny', file: 'tiny-test-eff.gguf', size: 84018656, thinks: true, upgrade: true, autoUpgrade: true, minVramGB: 0, bots: ['chat', 'code', 'design'], ctx: 4096, desc: 'Testmodell (sparsam)', urls: [process.env.FORGE_TEST_AUTOUP] });
   if (process.env.FORGE_TEST_UPGRADE) CATALOG.push({ id: 'test-profi', kind: 'code', title: 'Test-Profi', params: 'tiny', file: 'tiny-test-profi.gguf', size: 84018656, thinks: true, upgrade: true, minRamGB: 1, ctx: 4096, desc: 'Testmodell (Upgrade)', urls: [process.env.FORGE_TEST_UPGRADE] });
   CATALOG.unshift({ id: 'test-chat', kind: 'chat', title: 'Test-Chat', params: 'tiny', file: 'tiny-test-chat.gguf', size: 84018656, desc: 'Testmodell', urls: [process.env.FORGE_TEST_MODEL] });
 }
@@ -219,7 +239,7 @@ class Engine extends EventEmitter {
     const vram = hw.gpu ? hw.vramGB || 0 : 0;
     // Ohne passende Grafikkarte ist das kleine Modell deutlich flüssiger
     let level = vram >= 11 ? 2 : vram >= 5.5 ? 1 : 0;
-    const ids = kind === 'chat' ? ['chat-leicht', 'chat', 'chat-stark'] : ['leicht', 'standard', 'stark'];
+    const ids = kind === 'chat' ? ['chat-leicht', 'chat', 'chat-stark'] : ['leicht', vram >= 7 ? 'effizient' : 'standard', 'stark'];
     const free = this.freeDiskGB();
     if (free != null) {
       while (level > 0 && CATALOG.find((c) => c.id === ids[level]).size / GB + 1.5 > free) level--;
@@ -285,7 +305,8 @@ class Engine extends EventEmitter {
         recommended: hw && c.id === this.recommendedId(c.kind),
         downloading: !!(this.state.download && this.state.download.id === c.id) || !!(this.state.bgDownload && this.state.bgDownload.id === c.id),
         thinks: !!c.thinks,
-        upgrade: !!(c.upgrade && hw && (this.state.hardware.ramGB || 0) >= (c.minRamGB || 0)),
+        upgrade: !!(c.upgrade && hw && (this.state.hardware.ramGB || 0) >= (c.minRamGB || 0) && ((this.state.hardware.gpu && this.state.hardware.vramGB) || 0) >= (c.minVramGB || 0)),
+        autoUpgrade: !!c.autoUpgrade,
         usedBy: BOTS.filter((b) => botModels[b] === c.id),
       })),
     };
@@ -464,7 +485,12 @@ class Engine extends EventEmitter {
       this._adoptUpgrade(entry);
       return { ok: true, done: true };
     }
-    if (this.bgJob) return { ok: true, running: true };
+    if (this.bgJob) {
+      if (this.config.bgDownloadId === id) return { ok: true, running: true };
+      // Anderer Hintergrund-Download wird gerade beendet → danach starten
+      this.bgJob.finally(() => setTimeout(() => this.downloadBackground(id), 200));
+      return { ok: true, queued: true };
+    }
     if (this.downloadAbort) return { ok: false, error: 'Gerade läuft schon ein anderer Download.' };
     this.config.bgDownloadId = id;
     this.saveConfig();
@@ -494,23 +520,25 @@ class Engine extends EventEmitter {
     return { ok: true };
   }
 
-  cancelBackground() {
+  async cancelBackground() {
     this.config.bgDownloadId = null;
     this.saveConfig();
     if (this.bgAbort) this.bgAbort.abort();
     else this.set({ bgDownload: null });
+    if (this.bgJob) await this.bgJob.catch(() => {});
     return true;
   }
 
   // Fertig geladenes Profi-Modell für Coder und 3D-Designer übernehmen
   _adoptUpgrade(entry) {
-    for (const b of ['code', 'design']) {
+    const bots = entry.bots || ['code', 'design'];
+    for (const b of bots) {
       this.config.botModels[b] = entry.id;
       this.config.botExplicit[b] = true;
     }
     this.saveConfig();
-    this.set({ bgDownload: null, upgradeReady: { id: entry.id, title: entry.title, params: entry.params, at: Date.now() } });
-    if (['code', 'design'].includes(this.config.activeBot) && this.state.status !== 'downloading') this.start(this.config.activeBot);
+    this.set({ bgDownload: null, upgradeReady: { id: entry.id, title: entry.title, params: entry.params, bots, at: Date.now() } });
+    if (bots.includes(this.config.activeBot) && this.state.status !== 'downloading') this.start(this.config.activeBot);
   }
 
   _resumeBackground() {
@@ -518,7 +546,9 @@ class Engine extends EventEmitter {
     if (!id || this.bgJob) return;
     const entry = CATALOG.find((c) => c.id === id);
     if (!entry) return;
-    setTimeout(() => this.downloadBackground(id), 3000);
+    setTimeout(() => {
+      if (this.config.bgDownloadId === id && !this.bgJob) this.downloadBackground(id);
+    }, 3000);
   }
 
   // ---------- Download mit Fortsetzen ----------
@@ -954,7 +984,9 @@ Nicht suchen bei: normalem Programmieren, Erklären von Grundlagen, Plaudern, Re
     // Bei festen Formaten (3D, JSON) wird nicht nachgedacht.
     const entry = this.loadedEntry();
     const thinks = !!(entry && entry.thinks);
-    const thoughtBudget = !thinks || grammar ? 0 : { off: 0, short: 700, deep: 2500 }[think] ?? 700;
+    // Allrounder: nur bei „Gründlich“ kurz nachdenken, sonst sofort antworten
+    const level = bot === 'chat' ? (think === 'deep' ? 'short' : 'off') : think;
+    const thoughtBudget = !thinks || grammar ? 0 : { off: 0, short: 700, deep: 2500 }[level] ?? 700;
     const opts = {
       temperature,
       maxTokens: maxTokens || undefined,

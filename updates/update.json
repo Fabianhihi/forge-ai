@@ -1,10 +1,10 @@
 {
-  "version": "1.12.0",
+  "version": "1.13.0",
   "runtime": "electron-45.3.2+nlc-3.22.3",
-  "notes": "Neu in 1.12.0: Profi-Coder! Der neue Qwen3.6 (35B) ist das stärkste Coding-Modell, das auf deinem PC läuft – viel besserer Code als bisher, und er denkt vor dem Antworten nach (live sichtbar als „Gedankengang“). Er lädt sich einmal im Hintergrund (22 GB), während du ganz normal weiterarbeitest. Danach benutzen Coder und 3D-Designer ihn automatisch. Wie lange er nachdenkt, stellst du in den Einstellungen ein.",
+  "notes": "Neu in 1.13.0: Sparsamer Coder! Qwen3.5 (9B) läuft komplett auf deiner 8-GB-Grafikkarte und braucht kaum Arbeitsspeicher – deutlich besser als der alte 7B-Coder und denkt vor dem Antworten nach. Er lädt sich einmal im Hintergrund (5,7 GB) und wird danach von allen Bots benutzt. Der große 22-GB-Download aus 1.12 wird dafür gestoppt (der Profi bleibt optional im Modell-Menü).",
   "app": {
-    "file": "forge-app-1.12.0.json.gz",
-    "sha256": "f53ec10efe625c7e1e8ce6b7e31e4ae8ea69a8c4a64ccaec2c908490d24f69a2",
-    "size": 562733
+    "file": "forge-app-1.13.0.json.gz",
+    "sha256": "402d7fcbea2a196321535b753379a907a78da2fab157bf9d94daaf7f56e5ca1f",
+    "size": 563747
   }
 }
