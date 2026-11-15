@@ -7,6 +7,7 @@ const os = require('os');
 
 const runner = require('./runner');
 const checker = require('./checker');
+const vision = require('./vision');
 runner.registerScheme(); // muss vor app.ready passieren
 
 let win = null;
@@ -252,6 +253,7 @@ app.whenReady().then(() => {
   log('info', `FORGE AI ${app.getVersion()} startet · ${process.platform} ${os.release()} · Electron ${process.versions.electron} · ${Math.round(os.totalmem() / 1024 ** 3)} GB RAM`);
   runner.handleProtocol();
   runner.setLogger(log);
+  vision.setLogger(log);
   createWindow();
   // Alles automatisch: Hardware erkennen → Modell holen → KI starten
   startWorker();
@@ -405,6 +407,18 @@ ipcMain.handle('run:pip', async (e, id, module) => {
   }
 });
 ipcMain.handle('run:install', (_e, lang) => runner.installRuntime(String(lang)));
+// Bilder verstehen (Effizient-Modell + Bild-Encoder über llama.cpp)
+ipcMain.handle('vision:describe', async (e, req) => {
+  try {
+    return await vision.describe(req || {}, call, (st) => {
+      if (!e.sender.isDestroyed()) e.sender.send('vision:state', st);
+    });
+  } catch (err) {
+    log('warn', 'Bild: ' + err.message);
+    return { error: err.message, code: err.code || null };
+  }
+});
+
 // Selbstprüfung: Code der KI prüfen, bevor er gestartet wird
 ipcMain.handle('run:check', async (_e, spec) => {
   try {

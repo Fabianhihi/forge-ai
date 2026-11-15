@@ -51,6 +51,8 @@ function handleProtocol() {
       const pv = previews.get(id);
       if (!pv) return new Response('Diese Vorschau gibt es nicht mehr.', { status: 404 });
       const rel = rest.join('/') || pv.entry;
+      // Eingebaute Bibliotheken für Spiele: three.js + forge3d + Modelle vom 3D-Designer
+      if (rel.startsWith('__forge/')) return serveForgeLib(pv, rel.slice(8));
       let body = findFile(pv, rel);
       if (body == null) {
         if (pv.missing && !/favicon\.ico$/i.test(rel)) pv.missing.add(rel);
@@ -60,8 +62,12 @@ function handleProtocol() {
       const type = MIME[ext] || 'application/octet-stream';
       if (type === 'text/html') {
         let html = Buffer.isBuffer(body) ? body.toString('utf8') : String(body);
-        const hook = pv.test ? TEST_HOOK + CONSOLE_HOOK : CONSOLE_HOOK;
-        html = /<head[^>]*>/i.test(html) ? html.replace(/<head[^>]*>/i, (m) => m + hook) : hook + html;
+        const hook = importMap(id) + (pv.test ? TEST_HOOK + CONSOLE_HOOK : CONSOLE_HOOK);
+        // Ganz vorne in <head> einfügen (Import-Map muss vor allen Modul-Skripten stehen)
+        if (/<head[^>]*>/i.test(html)) html = html.replace(/<head[^>]*>/i, (m) => m + hook);
+        else if (/<html[^>]*>/i.test(html)) html = html.replace(/<html[^>]*>/i, (m) => m + '<head>' + hook + '</head>');
+        else if (/<!doctype[^>]*>/i.test(html)) html = html.replace(/<!doctype[^>]*>/i, (m) => m + hook);
+        else html = hook + html;
         body = html;
       }
       return new Response(body, { headers: { 'Content-Type': type + (type.startsWith('text') || type.endsWith('json') ? '; charset=utf-8' : ''), 'Cache-Control': 'no-store' } });
@@ -71,12 +77,41 @@ function handleProtocol() {
   });
 }
 
+// ---------- three.js & forge3d für Spiele (offline, ohne CDN) ----------
+const VENDOR = path.join(__dirname, 'vendor');
+const LIB_TYPES = { '.js': 'text/javascript; charset=utf-8', '.json': 'application/json; charset=utf-8' };
+function importMap(id) {
+  const b = `/${id}/__forge/`;
+  return `<script type="importmap">${JSON.stringify({
+    imports: { three: b + 'three/three.module.js', 'three/addons/': b + 'three/addons/', 'three/examples/jsm/': b + 'three/addons/', forge3d: b + 'forge3d/forge3d.js' },
+  })}</script>`;
+}
+function serveForgeLib(pv, rel) {
+  const headers = (t) => ({ 'Content-Type': t, 'Access-Control-Allow-Origin': '*', 'Cache-Control': 'no-cache' });
+  // Modelle dieses Chats
+  const m = /^forge3d\/models\/(.+)\.json$/.exec(rel);
+  if (m) {
+    const models = pv.models || {};
+    const key = decodeURIComponent(m[1]).toLowerCase();
+    const found = Object.keys(models).find((k) => k.toLowerCase() === key);
+    if (!found) {
+      if (pv.missing) pv.missing.add('Modell „' + key + '“');
+      return new Response('{}', { status: 404, headers: headers(LIB_TYPES['.json']) });
+    }
+    return new Response(JSON.stringify(models[found]), { headers: headers(LIB_TYPES['.json']) });
+  }
+  if (rel === 'forge3d/models/index.json') return new Response(JSON.stringify(Object.keys(pv.models || {})), { headers: headers(LIB_TYPES['.json']) });
+  const file = path.resolve(VENDOR, rel);
+  if (!file.startsWith(VENDOR + path.sep) || !fs.existsSync(file) || !fs.statSync(file).isFile()) return new Response('nicht gefunden', { status: 404 });
+  return new Response(fs.readFileSync(file), { headers: headers(LIB_TYPES[path.extname(file)] || 'application/octet-stream') });
+}
+
 // Testlauf der Selbstprüfung: keine Popups, keine neuen Fenster
 const TEST_HOOK = `<script>(()=>{window.alert=()=>{};window.confirm=()=>true;window.prompt=(m,d)=>d||'';window.open=()=>null;})();</script>`;
 
-function createPreview({ files = {}, entry, baseDir = null, test = false }) {
+function createPreview({ files = {}, entry, baseDir = null, test = false, models = null }) {
   const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
-  previews.set(id, { files, entry, baseDir, test, missing: test ? new Set() : null });
+  previews.set(id, { files, entry, baseDir, test, models: models || {}, missing: test ? new Set() : null });
   while (previews.size > 30) previews.delete(previews.keys().next().value);
   return { id, url: `forge-run://preview/${id}/${encodeURI(entry)}` };
 }
@@ -512,4 +547,4 @@ function setLogger(log) {
   if (log) pyLog = log;
 }
 
-module.exports = { detectRuntimes, previewInfo, dropPreview, ensurePython, registerScheme, handleProtocol, createPreview, openPreviewWindow, publicRuntimes, start, input, stop, stopAll, pipInstall, installRuntime, prefetchPython, forgePythonReady, setLogger };
+module.exports = { getJson, downloadTo, extractZip, detectRuntimes, previewInfo, dropPreview, ensurePython, registerScheme, handleProtocol, createPreview, openPreviewWindow, publicRuntimes, start, input, stop, stopAll, pipInstall, installRuntime, prefetchPython, forgePythonReady, setLogger };

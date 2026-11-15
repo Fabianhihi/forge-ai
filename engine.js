@@ -75,6 +75,8 @@ const CATALOG = [
     autoUpgrade: true,
     minVramGB: 7,
     bots: ['chat', 'code', 'design'],
+    // Bild-Verständnis: passender Bild-Encoder (mmproj) für llama.cpp
+    vision: { file: 'Qwen3.5-9B-mmproj-F16.gguf', size: 0.918e9, url: hf('unsloth/Qwen3.5-9B-GGUF', 'mmproj-F16.gguf') },
     desc: 'Qwen3.5 – läuft komplett auf der Grafikkarte (8 GB) und braucht kaum Arbeitsspeicher. Denkt vor dem Antworten nach. Beste Wahl für 8-GB-Grafikkarten.',
     urls: [
       hf('unsloth/Qwen3.5-9B-GGUF', 'Qwen3.5-9B-Q4_K_M.gguf'),
@@ -143,7 +145,7 @@ const CATALOG = [
 // Nur für Tests: kleine Modelle per Umgebungsvariable einspielen
 if (process.env.FORGE_TEST_MODEL) {
   CATALOG.unshift({ id: 'test', kind: 'code', title: 'Test-Coder', params: 'tiny', file: 'tiny-test.gguf', size: 84018656, desc: 'Testmodell', urls: [process.env.FORGE_TEST_MODEL] });
-  if (process.env.FORGE_TEST_AUTOUP) CATALOG.push({ id: 'test-eff', kind: 'code', title: 'Test-Effizient', params: 'tiny', file: 'tiny-test-eff.gguf', size: 84018656, thinks: true, upgrade: true, autoUpgrade: true, minVramGB: 0, bots: ['chat', 'code', 'design'], ctx: 4096, desc: 'Testmodell (sparsam)', urls: [process.env.FORGE_TEST_AUTOUP] });
+  if (process.env.FORGE_TEST_AUTOUP) CATALOG.push({ id: 'test-eff', kind: 'code', title: 'Test-Effizient', params: 'tiny', file: 'tiny-test-eff.gguf', size: 84018656, thinks: true, upgrade: true, autoUpgrade: true, minVramGB: 0, bots: ['chat', 'code', 'design'], ctx: 4096, vision: { file: 'tiny-test-mmproj.gguf', size: 1000, url: process.env.FORGE_TEST_AUTOUP }, desc: 'Testmodell (sparsam)', urls: [process.env.FORGE_TEST_AUTOUP] });
   if (process.env.FORGE_TEST_UPGRADE) CATALOG.push({ id: 'test-profi', kind: 'code', title: 'Test-Profi', params: 'tiny', file: 'tiny-test-profi.gguf', size: 84018656, thinks: true, upgrade: true, minRamGB: 1, ctx: 4096, desc: 'Testmodell (Upgrade)', urls: [process.env.FORGE_TEST_UPGRADE] });
   CATALOG.unshift({ id: 'test-chat', kind: 'chat', title: 'Test-Chat', params: 'tiny', file: 'tiny-test-chat.gguf', size: 84018656, desc: 'Testmodell', urls: [process.env.FORGE_TEST_MODEL] });
 }
@@ -359,6 +361,7 @@ class Engine extends EventEmitter {
 
   // ---------- Ablauf: alles automatisch ----------
   async start(bot) {
+    if (this.suspended) return; // Bild wird gerade angesehen – danach startet resume() die KI wieder
     if (bot && BOTS.includes(bot) && bot !== this.config.activeBot) {
       this.config.activeBot = bot;
       this.saveConfig();
@@ -982,7 +985,37 @@ Nicht suchen bei: normalem Programmieren, Erklären von Grundlagen, Plaudern, Re
     return this.loadedPath ? CATALOG.find((c) => this.modelPath(c) === this.loadedPath) || null : null;
   }
 
+  // ---------- Pause fürs Bild-Verständnis (die Grafikkarte wird kurz für das Bild-Modell gebraucht) ----------
+  visionModel() {
+    const e = CATALOG.find((c) => c.vision && this.isInstalled(c));
+    return e ? { id: e.id, path: this.modelPath(e), mmproj: e.vision, dir: this.modelsDir } : { id: null, path: null, dir: this.modelsDir };
+  }
+
+  async suspend(reason) {
+    this.suspended = true;
+    this._suspendWait = this._suspendWait || new Promise((r) => (this._suspendDone = r));
+    await this.unload();
+    this.set({ status: 'paused', message: reason || 'Die KI schaut sich ein Bild an …' });
+    return true;
+  }
+
+  resume() {
+    if (!this.suspended) return true;
+    this.suspended = false;
+    if (this._suspendDone) this._suspendDone();
+    this._suspendWait = null;
+    this.set({ status: 'idle', message: '' });
+    this.start(this.config.activeBot);
+    return true;
+  }
+
   async _chat({ messages, temperature = 0.3, schema, gbnf, maxTokens, bot, web: useWeb, think = 'short' }, onText, signal) {
+    // Während ein Bild angesehen wird, warten
+    while (this.suspended) {
+      onText(null, { waiting: true });
+      await Promise.race([this._suspendWait, new Promise((r) => signal.addEventListener('abort', r, { once: true }))]);
+      if (signal.aborted) return { aborted: true };
+    }
     // Anderer Bot mit anderem Modell? Dann zuerst umschalten (ggf. mit Download).
     if (bot && BOTS.includes(bot)) {
       const aborted = new Promise((r) => signal.addEventListener('abort', r, { once: true }));

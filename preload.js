@@ -78,6 +78,12 @@ contextBridge.exposeInMainWorld('forge', {
     applyLive: () => ipcRenderer.invoke('update:applyLive'),
     booted: () => ipcRenderer.send('app:booted'),
   },
+  vision: {
+    describe: (req) => ipcRenderer.invoke('vision:describe', req),
+    onState: (fn) => {
+      ipcRenderer.on('vision:state', (_e, st) => fn(st));
+    },
+  },
   run: {
     preview: (opts) => ipcRenderer.invoke('run:preview', opts),
     previewWindow: (url) => ipcRenderer.invoke('run:previewWindow', url),

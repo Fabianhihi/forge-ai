@@ -453,3 +453,24 @@ body.resizing iframe { pointer-events: none; }
 .thought-body { margin-top: 6px; white-space: pre-wrap; max-height: 260px; overflow: auto; line-height: 1.45; font-size: 12px; }
 #upgradeBar .ub-list { margin: 0; padding-left: 16px; color: var(--text); display: flex; flex-direction: column; gap: 2px; }
 #upgradeBar .ub-list li span { color: var(--muted); }
+/* ---------- Bestellte 3D-Modelle ---------- */
+.model-card.order .mc-info { display: flex; flex-direction: column; gap: 2px; }
+.model-card.order .mc-info > span { color: var(--muted); font-size: 12px; }
+.model-card.order .mc-status { display: inline-flex; align-items: center; gap: 6px; color: #c4b2ff !important; }
+
+/* ---------- Bilder ---------- */
+.img3d-box { margin: 8px 0 4px; }
+.img3d-box.drop { outline: 2px dashed #a78bfa; outline-offset: 4px; border-radius: 10px; }
+#img3dPrev { display: flex; align-items: center; gap: 10px; border: 1px solid var(--line-2); background: var(--elev); border-radius: 10px; padding: 6px; }
+#img3dPrev img { width: 56px; height: 56px; object-fit: contain; border-radius: 6px; background: #fff; }
+#img3dPrev div { flex: 1; display: flex; flex-direction: column; font-size: 12px; min-width: 0; }
+#img3dPrev b { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#img3dPrev span { color: var(--muted); }
+#img3dPrev .pal { display: flex; gap: 3px; margin-top: 3px; }
+#img3dPrev .pal i { width: 12px; height: 12px; border-radius: 3px; display: inline-block; border: 1px solid #0006; }
+#refImg { position: absolute; left: 14px; bottom: 14px; width: 140px; max-height: 140px; object-fit: contain; background: #fff; border-radius: 10px; border: 2px solid #ffffff22; box-shadow: 0 6px 20px #0008; opacity: 0.92; }
+.file-pill.img { padding-left: 3px; }
+.file-pill.img img { width: 22px; height: 22px; object-fit: cover; border-radius: 4px; }
+.msg.user .msg-imgs { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; margin-bottom: 6px; }
+.msg.user .msg-imgs img { max-width: 220px; max-height: 160px; border-radius: 10px; border: 1px solid var(--line-2); }
+.vision-note { font-size: 12px; color: var(--muted); margin-top: 6px; }

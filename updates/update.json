@@ -1,10 +1,10 @@
 {
-  "version": "1.13.1",
+  "version": "1.14.0",
   "runtime": "electron-45.3.2+nlc-3.22.3",
-  "notes": "Neu in 1.13.1: FORGE räumt selbst auf. Ist zu wenig Speicherplatz für ein Modell frei, zeigt FORGE, welche eigenen Dateien weg können (halbe Downloads, Modelle, die ersetzt werden) – ein Klick schafft Platz und lädt weiter. Nach dem Wechsel auf ein neues Modell bietet FORGE an, alte Modelle zu löschen.",
+  "notes": "Neu in 1.14.0: Die KI versteht Bilder! Im 3D-Tab kannst du ein Bild hochladen, reinziehen oder mit Strg+V einfügen – die KI schaut es sich an und baut es als 3D-Modell nach. Auch im Chat kannst du Bilder anhängen (z. B. Screenshots von Fehlern). Und der Coder kann jetzt 3D-Modelle beim 3D-Designer bestellen und direkt in 3D-Spielen benutzen (three.js ist eingebaut, läuft offline). Bilder verstehen braucht das Effizient-Modell; beim ersten Bild lädt FORGE einmalig ca. 1 GB nach.",
   "app": {
-    "file": "forge-app-1.13.1.json.gz",
-    "sha256": "0c12b82b0d16cee3b6ce1a76ed9e10bd52a87a46f78e64a91bf45ea061b23ad9",
-    "size": 566674
+    "file": "forge-app-1.14.0.json.gz",
+    "sha256": "7a16a32dd51243d84b803aa87b50f04824d70c1df7158a951f8c5e681b8ffb58",
+    "size": 941487
   }
 }

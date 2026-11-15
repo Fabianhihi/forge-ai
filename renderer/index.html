@@ -88,7 +88,7 @@
           </button>
         </div>
         <div class="composer-hint">Läuft lokal mit <span id="hintModel">–</span>. Antworten können Fehler enthalten.</div>
-        <input type="file" id="fileInput" multiple hidden>
+        <input type="file" id="fileInput" multiple hidden accept="*/*">
       </div>
       <div id="dropZone">Dateien hier ablegen</div>
       </div>
@@ -127,7 +127,12 @@
         <div class="panel-scroll">
           <h2>3D-Modell erzeugen</h2>
           <p class="muted small">Beschreib, was du willst. Deine KI baut das Modell aus 3D-Formen und du kannst es als GLB, OBJ oder STL exportieren (für Blender, Unity, Unreal, Minecraft-Mods oder den 3D-Drucker).</p>
-          <textarea id="prompt3d" rows="4" placeholder="z. B. Ein Kampf-Mech mit zwei Schulterkanonen und leuchtendem Cockpit"></textarea>
+          <textarea id="prompt3d" rows="4" placeholder="z. B. Ein Kampf-Mech mit zwei Schulterkanonen und leuchtendem Cockpit – oder gib der KI ein Bild"></textarea>
+          <div id="img3dBox" class="img3d-box">
+            <button id="img3dBtn" class="btn sm ghost" title="Bild hochladen, reinziehen oder mit Strg+V einfügen">📷 Bild nachbauen</button>
+            <div id="img3dPrev" hidden><img alt=""><div><b></b><span>Die KI baut das Bild nach</span></div><button class="icon-btn" id="img3dDel" title="Bild entfernen">✕</button></div>
+            <input type="file" id="img3dInput" accept="image/png,image/jpeg,image/webp" hidden>
+          </div>
           <div class="chips" id="styleChips"></div>
           <div class="row">
             <span class="row-label">Detail</span>
@@ -166,6 +171,7 @@
 
       <div class="viewport-wrap">
         <div id="viewport"></div>
+        <img id="refImg" hidden alt="Vorlage" title="Vorlage">
         <div id="vpTitle"></div>
         <div class="vp-toolbar">
           <button class="tool" id="tRotate" title="Automatisch drehen"><svg viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/></svg></button>

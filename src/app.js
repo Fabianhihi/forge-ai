@@ -48,6 +48,7 @@ const DEFAULTS = {
 };
 
 const S = {
+  building: {},
   settings: { ...DEFAULTS, ...load('forge.settings', {}) },
   convs: load('forge.convs', []),
   models: load('forge.models', []),
@@ -98,6 +99,15 @@ md.use({
         return `<div class="model-card"><div class="mc-icon">◆</div><div class="mc-info"><b>${esc(m.name)}</b><span>${m.parts.length} Teile <span class="mc-sw">${sw}</span></span></div>
 <div class="mc-actions"><button class="btn sm primary" data-act="open3d">In 3D öffnen</button><button class="btn sm ghost" data-act="copy">${I.copy}</button></div>
 <pre hidden><code>${esc(text)}</code></pre></div>`;
+      }
+      if (l === 'forge-modell' || l === 'forge-model') {
+        const o = parseOrder(text);
+        const conv = currentConv();
+        const done = conv && conv.models && conv.models[o.key];
+        const st = S.building[o.key];
+        const status = st ? `<span class="spinner"></span> ${esc(st)}` : done ? `✓ gebaut – ${done.parts.length} Teile` : 'wird gebaut, sobald die Antwort fertig ist';
+        return `<div class="model-card order" data-order="${esc(o.key)}"><div class="mc-icon">🧊</div><div class="mc-info"><b>3D-Modell „${esc(o.key)}“ vom 3D-Designer</b><span>${esc(o.description.slice(0, 120))}</span><span class="mc-status">${status}</span></div>
+<div class="mc-actions">${done ? `<button class="btn sm ghost" data-act="openorder" data-key="${esc(o.key)}">Ansehen</button><button class="btn sm ghost" data-act="rebuildorder" data-key="${esc(o.key)}">Neu bauen</button>` : ''}</div></div>`;
       }
       const fileHint = (raw.match(/([\w\-./\\]+\.[a-z0-9]{1,8})/i) || [])[1] || '';
       let html;
@@ -345,6 +355,10 @@ function renderStatus() {
       el.classList.add('busy');
       text = `Lade Modell … ${dlPct(st.download)} %`;
       break;
+    case 'paused':
+      el.classList.add('busy');
+      text = '👁 Schaut sich ein Bild an …';
+      break;
     case 'loading':
       el.classList.add('busy');
       text = `KI startet … ${st.loadProgress || 0} %`;
@@ -538,8 +552,10 @@ function userEl(m) {
         : `<div><div class="bubble"><b>🔧 Automatische Reparatur${m.attempt ? ` (Versuch ${m.attempt}/${MAX_REPAIR})` : ''}</b><span>Beim Ausführen kam ein Fehler – die KI behebt ihn selbst.</span><details><summary>Fehlermeldung</summary><pre>${esc(err.slice(-1500))}</pre></details></div></div>`;
     return d;
   }
-  const files = (m.files || []).map((f) => `<span class="file-pill">${esc(f.name)}</span>`).join('');
-  d.innerHTML = `<div><div class="bubble">${esc(m.content) || '<span class="muted">(nur Dateien)</span>'}</div>${files ? `<div class="files">${files}</div>` : ''}</div>`;
+  const imgs = (m.files || []).filter((f) => f.image && f.thumb).map((f) => `<img src="${f.thumb}" alt="${esc(f.name)}" title="${esc(f.name)}">`).join('');
+  const files = (m.files || []).filter((f) => !f.image).map((f) => `<span class="file-pill">${esc(f.name)}</span>`).join('');
+  const seen = (m.files || []).filter((f) => f.image).map((f) => (f.description ? `<details class="vision-note"><summary>👁 So hat die KI „${esc(f.name)}“ gesehen</summary>${esc(f.description)}</details>` : f.visionError ? `<div class="vision-note">⚠ Bild nicht verstanden: ${esc(f.visionError)}</div>` : '')).join('');
+  d.innerHTML = `<div>${imgs ? `<div class="msg-imgs">${imgs}</div>` : ''}${m.content || !imgs ? `<div class="bubble">${esc(m.content) || '<span class="muted">(nur Dateien)</span>'}</div>` : ''}${files ? `<div class="files">${files}</div>` : ''}${seen}</div>`;
   return d;
 }
 
@@ -601,9 +617,11 @@ function webText(t) {
 }
 
 function waitingText(m) {
+  if (m.visionText) return m.visionText;
   const st = S.engine || {};
   const b = BOTS[m.bot] || BOTS.chat;
   if (st.status === 'downloading' && st.download) return `Lade das KI-Modell ${st.download.title} (${st.download.params}) … ${dlPct(st.download)} % (nur einmal nötig)`;
+  if (st.status === 'paused') return 'Die KI schaut sich gerade ein Bild an … gleich geht es weiter.';
   if (st.status === 'loading') return `Wechsle zum ${b.name}-Modell … ${st.loadProgress || 0} %`;
   if (m.switching) return `Wechsle zum ${b.name} …`;
   return "Deine KI startet noch … gleich geht's los.";
@@ -642,6 +660,10 @@ function toPlain(m) {
       '\n\n' +
       m.files
         .map((f) => {
+          if (f.image)
+            return f.description
+              ? `Bild **${f.name}** (FORGE hat es sich für dich angesehen – so sieht es aus):\n${f.description}${f.palette && f.palette.length ? `\nHauptfarben: ${f.palette.join(' ')}` : ''}`
+              : `Bild **${f.name}** (konnte nicht angesehen werden: ${f.visionError || 'unbekannt'})`;
           const ext = (f.name.split('.').pop() || '').toLowerCase();
           return `Datei **${f.name}**:\n\`\`\`${LANG_OF_EXT[ext] || ''}\n${f.content}\n\`\`\``;
         })
@@ -662,8 +684,10 @@ function stopStream() {
   if (S.streamId) forge.abort(S.streamId);
 }
 
+let pendingImages = [];
 async function sendMessage(regenerate = false, preset = null) {
   if (S.busy) return null;
+  pendingImages = [];
   const input = $('#input');
   const text = preset ? preset.text : input.value.trim();
   let conv = currentConv();
@@ -673,7 +697,12 @@ async function sendMessage(regenerate = false, preset = null) {
   } else if (!regenerate) {
     if (!text && !S.attachments.length) return null;
     if (!conv) conv = newConv();
-    const um = { role: 'user', content: text, files: S.attachments.map((a) => ({ name: a.name, content: a.content })) };
+    pendingImages = S.attachments.filter((a) => a.image).map((a) => a.image);
+    const um = {
+      role: 'user',
+      content: text,
+      files: S.attachments.map((a) => (a.image ? { name: a.name, image: true, thumb: a.image.thumb, palette: a.image.palette } : { name: a.name, content: a.content })),
+    };
     conv.messages.push(um);
     if (conv.messages.length === 1) conv.title = (text || um.files[0]?.name || 'Chat').replace(/\s+/g, ' ').slice(0, 52);
     input.value = '';
@@ -697,6 +726,33 @@ async function sendMessage(regenerate = false, preset = null) {
   const el = $('#messages').lastElementChild;
   scrollBottom(true);
 
+  // Angehängte Bilder: von der KI ansehen lassen, Beschreibung bleibt an der Nachricht
+  const um = conv.messages[conv.messages.length - 2];
+  if (pendingImages.length && um && um.files) {
+    setBusy(true);
+    const imgFiles = um.files.filter((f) => f.image && !f.description);
+    for (let i = 0; i < imgFiles.length && i < pendingImages.length; i++) {
+      ai.waiting = true;
+      const r = await describeImage(pendingImages[i], bot === 'design' ? 'model3d' : 'chat', um.content, (t) => {
+        ai.visionText = t;
+        fillAi(el, ai, false, true);
+      });
+      if (r && r.text) imgFiles[i].description = r.text;
+      else {
+        imgFiles[i].description = null;
+        imgFiles[i].visionError = (r && r.error) || 'unbekannter Fehler';
+        toast('Bild: ' + imgFiles[i].visionError, 'err');
+      }
+    }
+    delete ai.visionText;
+    ai.waiting = false;
+    setBusy(false);
+    saveConvs();
+    // Nutzer-Nachricht neu zeichnen (zeigt jetzt, wie die KI das Bild gesehen hat)
+    const uel = el.previousElementSibling;
+    if (uel && uel.classList.contains('user')) uel.replaceWith(userEl(um));
+  }
+  pendingImages = [];
   const msgs = conv.messages.slice(0, -1).map(toPlain);
   if (bot === 'design' && msgs.length) {
     // Passende Bauplan-Beispiele unsichtbar an die Frage hängen (z. B. bei „Roblox-Charakter“)
@@ -756,6 +812,8 @@ async function sendMessage(regenerate = false, preset = null) {
     saveConvs();
     if (nearBottom()) scrollBottom(true);
   }
+  // Bestellte 3D-Modelle vom 3D-Designer bauen lassen
+  if (!ai.error && !ai.stopped && ai.content && bot !== 'design' && /```forge-modell/i.test(ai.content)) await buildOrders(conv, ai, el);
   // Selbstprüfung: Fehler finden, bevor der Nutzer startet – und gleich beheben lassen
   if (!ai.error && !ai.stopped && ai.content && bot !== 'design' && S.settings.selfCheck !== false) {
     const fixed = await selfCheck(conv, ai, el, (preset && preset.checkRound) || 0);
@@ -771,6 +829,21 @@ $('#messages').addEventListener('click', async (e) => {
   const act = btn.dataset.act;
   if (act === 'setup') return openModels();
   if (act === 'src') return forge.openExternal(btn.dataset.url);
+  if (act === 'openorder') {
+    const m = convModels()[btn.dataset.key];
+    if (!m) return;
+    setMode('3d');
+    showModel(normalizeModel(m));
+    return;
+  }
+  if (act === 'rebuildorder') {
+    const conv = currentConv();
+    const msgEl = btn.closest('.msg');
+    const idx = $$('#messages > .msg').indexOf(msgEl);
+    const m = conv && conv.messages[idx];
+    if (!m || S.busy) return;
+    return buildOrders(conv, m, msgEl, btn.dataset.key);
+  }
   if (act === 'fixcheck') {
     const conv = currentConv();
     const msgEl = btn.closest('.msg');
@@ -863,10 +936,107 @@ document.addEventListener('keydown', (e) => {
   }
 });
 
+// ---------- Bilder: verkleinern, Vorschau, Hauptfarben ----------
+function readImage(file) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = () => reject(new Error('Bild konnte nicht geöffnet werden'));
+    img.src = url;
+  });
+}
+function drawScaled(img, max, bg) {
+  const k = Math.min(1, max / Math.max(img.naturalWidth, img.naturalHeight));
+  const c = document.createElement('canvas');
+  c.width = Math.max(1, Math.round(img.naturalWidth * k));
+  c.height = Math.max(1, Math.round(img.naturalHeight * k));
+  const ctx = c.getContext('2d', { willReadFrequently: true });
+  if (bg) {
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, c.width, c.height);
+  }
+  ctx.drawImage(img, 0, 0, c.width, c.height);
+  return { c, ctx };
+}
+// Hauptfarben (ohne Hintergrund): grob einteilen, zählen, ähnliche zusammenfassen
+function imagePalette(img) {
+  const { c, ctx } = drawScaled(img, 72, null);
+  const d = ctx.getImageData(0, 0, c.width, c.height).data;
+  const px = (x, y) => {
+    const i = (y * c.width + x) * 4;
+    return [d[i], d[i + 1], d[i + 2], d[i + 3]];
+  };
+  const border = [];
+  for (let x = 0; x < c.width; x++) border.push(px(x, 0), px(x, c.height - 1));
+  for (let y = 0; y < c.height; y++) border.push(px(0, y), px(c.width - 1, y));
+  const opaque = border.filter((p) => p[3] > 128);
+  const bg = opaque.length > border.length * 0.6 ? opaque.reduce((a, p) => [a[0] + p[0] / opaque.length, a[1] + p[1] / opaque.length, a[2] + p[2] / opaque.length], [0, 0, 0]) : null;
+  const bgUniform = bg && opaque.filter((p) => Math.hypot(p[0] - bg[0], p[1] - bg[1], p[2] - bg[2]) < 40).length > opaque.length * 0.7;
+  const buckets = new Map();
+  for (let i = 0; i < d.length; i += 4) {
+    if (d[i + 3] < 128) continue;
+    const r = d[i],
+      g = d[i + 1],
+      b = d[i + 2];
+    if (bgUniform && Math.hypot(r - bg[0], g - bg[1], b - bg[2]) < 42) continue;
+    const key = (r >> 5) * 64 + (g >> 5) * 8 + (b >> 5);
+    const e = buckets.get(key) || { n: 0, r: 0, g: 0, b: 0 };
+    e.n++;
+    e.r += r;
+    e.g += g;
+    e.b += b;
+    buckets.set(key, e);
+  }
+  const cols = [...buckets.values()].map((e) => ({ n: e.n, c: [e.r / e.n, e.g / e.n, e.b / e.n] })).sort((a, b) => b.n - a.n);
+  const total = cols.reduce((n, x) => n + x.n, 0) || 1;
+  const out = [];
+  for (const x of cols) {
+    if (x.n / total < 0.02 || out.length >= 6) break;
+    if (out.some((o) => Math.hypot(o[0] - x.c[0], o[1] - x.c[1], o[2] - x.c[2]) < 55)) continue;
+    out.push(x.c);
+  }
+  return out.map((c) => '#' + c.map((v) => Math.round(v).toString(16).padStart(2, '0')).join(''));
+}
+async function prepareImage(file) {
+  if (file.size > 25 * 1024 * 1024) throw new Error(`${file.name} ist zu groß (max. 25 MB)`);
+  const img = await readImage(file);
+  const big = drawScaled(img, 896, '#ffffff').c.toDataURL('image/jpeg', 0.9);
+  const thumb = drawScaled(img, 240, '#ffffff').c.toDataURL('image/jpeg', 0.78);
+  return { name: file.name || 'Bild', dataUrl: big, thumb, palette: imagePalette(img) };
+}
+// Fortschritt beim ersten Bild (Bild-Paket + Bild-Encoder einmalig laden)
+let visionListener = null;
+forge.vision.onState((st) => visionListener && visionListener(st));
+function visionText(st) {
+  if (st.phase === 'pack') return `Lade Bild-Verständnis … ${st.pct || 0} % (nur beim ersten Bild)`;
+  if (st.phase === 'mmproj') return `Lade Bild-Encoder … ${st.pct || 0} % (nur beim ersten Bild, 0,9 GB)`;
+  if (st.phase === 'look') return st.cpu ? '👁 Schaut sich das Bild an (auf dem Prozessor, dauert etwas) …' : '👁 Die KI schaut sich das Bild an …';
+  return '👁 Bereite Bild-Verständnis vor …';
+}
+async function describeImage(image, mode, question, onText) {
+  visionListener = (st) => onText(visionText(st));
+  onText(visionText({ phase: 'prepare' }));
+  try {
+    return await forge.vision.describe({ imageData: image.dataUrl, mode, question });
+  } finally {
+    visionListener = null;
+  }
+}
+
 // Dateien anhängen
 const MAX_FILE = 300 * 1024;
 async function addFiles(fileList) {
   for (const f of fileList) {
+    if (/^image\/(png|jpe?g|webp|gif|bmp)$/i.test(f.type)) {
+      try {
+        const im = await prepareImage(f);
+        S.attachments.push({ name: im.name, image: im });
+      } catch (err) {
+        toast(err.message, 'err');
+      }
+      continue;
+    }
     if (f.size > MAX_FILE) {
       toast(`${f.name} ist zu groß (max. 300 KB)`, 'err');
       continue;
@@ -882,7 +1052,7 @@ async function addFiles(fileList) {
 }
 function renderAttachments() {
   $('#attachList').innerHTML = S.attachments
-    .map((a, i) => `<span class="file-pill">${esc(a.name)}<button data-i="${i}" title="Entfernen">${I.x}</button></span>`)
+    .map((a, i) => `<span class="file-pill${a.image ? ' img' : ''}">${a.image ? `<img src="${a.image.thumb}" alt="">` : ''}${esc(a.name)}<button data-i="${i}" title="Entfernen">${I.x}</button></span>`)
     .join('');
 }
 $('#attachList').addEventListener('click', (e) => {
@@ -1049,7 +1219,7 @@ function specFromBlock(cb) {
       entry = 'index.html';
     }
     files[entry] = html;
-    return { kind, file, lines: code.split('\n').length, spec: { files, entry } };
+    return { kind, file, lines: code.split('\n').length, spec: { files, entry, models: convModels() } };
   }
   if (kind === 'webjs') {
     const js = file || 'main.js';
@@ -1057,11 +1227,17 @@ function specFromBlock(cb) {
     if (!files['index.html']) {
       files['index.html'] = `<!doctype html><html><head><meta charset="utf-8"><style>html,body{margin:0;height:100%;background:#111;color:#eee;font-family:system-ui,sans-serif}canvas{display:block}</style></head><body><canvas id="canvas" width="800" height="600"></canvas><canvas id="game" width="800" height="600" style="display:none"></canvas><script src="${js}"></script></body></html>`;
     }
-    return { kind, file, lines: code.split('\n').length, spec: { files, entry: 'index.html' } };
+    return { kind, file, lines: code.split('\n').length, spec: { files, entry: 'index.html', models: convModels() } };
   }
   const entry = file || 'main.' + LANG_EXT[kind];
   files[entry] = code;
   return { kind, file, lines: code.split('\n').length, spec: { lang: kind, files, entry } };
+}
+
+// Modelle des aktuellen Chats für Spiele bereitstellen
+function convModels() {
+  const c = currentConv();
+  return (c && c.models) || {};
 }
 
 function runFromBlock(cb, attempt = 0) {
@@ -1073,6 +1249,91 @@ function runFromBlock(cb, attempt = 0) {
   const title = (conv0 && conv0.title) || s.file || LANG_NAME[s.kind];
   if (s.kind === 'web' || s.kind === 'webjs') return runWeb(s.spec, title, s.kind);
   runProgram(s.spec, title);
+}
+
+// ======================================================================
+//        Coder bestellt 3D-Modelle beim 3D-Designer
+// ======================================================================
+const modelKey = (n) =>
+  String(n || 'modell')
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9äöüß_-]+/gi, '-')
+    .replace(/^-+|-+$/g, '') || 'modell';
+
+function parseOrder(text) {
+  const get = (k) => (new RegExp('^\\s*(?:' + k + ')\\s*:\\s*(.+)$', 'im').exec(text) || [])[1] || '';
+  const name = get('name');
+  let description = get('beschreibung|description|was|aussehen');
+  if (!description) description = text.replace(/^\s*name\s*:.*$/im, '').trim();
+  return { key: modelKey(name || description.split(/\s+/)[0]), name: name || description.split(/\s+/)[0], description: description.slice(0, 600), style: get('stil|style'), size: get('größe|groesse|hoehe|höhe|size') };
+}
+
+function ordersIn(content) {
+  const out = [];
+  const re = /```forge-modell?\s*\n([\s\S]*?)```/gi;
+  let m;
+  while ((m = re.exec(content))) {
+    const o = parseOrder(m[1]);
+    if (!out.some((x) => x.key === o.key)) out.push(o);
+  }
+  return out.slice(0, 6);
+}
+
+// Ein Modell ohne den 3D-Tab bauen (gleiche Qualität: Baupläne, Beispiele, Andocken)
+async function buildModelHeadless(order, onLine) {
+  const shots = [];
+  for (const ex of examplesFor(order.description + ' ' + order.style)) {
+    shots.push({ role: 'user', content: `Baue dieses 3D-Modell: ${ex.split('\n')[0].replace(/^name:\s*/, '')}` });
+    shots.push({ role: 'assistant', content: ex });
+  }
+  const userMsg = `Baue dieses 3D-Modell: ${order.description}\n${order.style ? `Stil: ${order.style}\n` : ''}${DETAIL_LEVELS[2]}\nDas Modell wird in einem Spiel benutzt: Es steht auf dem Boden (y = 0) und schaut nach vorne (+z).\nWenn ein Bauplan (template) passt, fang damit an und ergänze danach Details, die genau an den angegebenen Punkten sitzen.`;
+  let maxTokens = DETAIL_TOKENS[2] || 1800;
+  const dbgMax = Number(load('forge.debugMaxTokens', 0)); // nur für Tests
+  if (dbgMax) maxTokens = Math.min(maxTokens, dbgMax);
+  let text = '';
+  const res = await forge.chat(
+    uid(),
+    { messages: [{ role: 'system', content: model3dSystemPrompt() }, ...shots, { role: 'user', content: userMsg }], temperature: 0.45, gbnf: MODEL_GRAMMAR, maxTokens, bot: 'design' },
+    (d) => {
+      if (d.text) {
+        text += d.text;
+        if (onLine && d.text.includes('\n')) onLine(text.split('\n').filter((l) => l.includes('|')).length);
+      }
+    }
+  );
+  if (res && res.aborted) return null;
+  let raw = parseModelText(text);
+  if (!raw.parts.length) return null;
+  if (!raw.name || raw.name === 'Modell') raw.name = order.name;
+  return finishModel(raw, text).model;
+}
+
+// Nach einer Coder-Antwort: bestellte Modelle bauen (bevor geprüft oder gestartet wird)
+async function buildOrders(conv, ai, el, force = null) {
+  const orders = ordersIn(ai.content).filter((o) => force ? o.key === force : !(conv.models && conv.models[o.key]));
+  if (!orders.length) return;
+  conv.models = conv.models || {};
+  const redraw = () => el.isConnected && fillAi(el, ai, true, conv.messages[conv.messages.length - 1] === ai);
+  for (const o of orders) {
+    S.building[o.key] = 'Der 3D-Designer baut das Modell …';
+    redraw();
+    try {
+      const m = await buildModelHeadless(o, (n) => {
+        S.building[o.key] = `Der 3D-Designer baut das Modell … ${n} Teile`;
+        redraw();
+      });
+      if (m) {
+        conv.models[o.key] = { ...m, name: m.name || o.name };
+        saveToLibrary(m, `Für den Coder: ${o.description}`);
+      } else toast(`Modell „${o.key}“ konnte nicht gebaut werden – das Spiel nutzt einen Platzhalter.`, 'err');
+    } catch (err) {
+      toast(`Modell „${o.key}“: ${err.message || err}`, 'err');
+    }
+    delete S.building[o.key];
+    saveConvs();
+    redraw();
+  }
 }
 
 // ======================================================================
@@ -1094,7 +1355,7 @@ function checkSpecs(el) {
     const key = ck === 'web' ? 'web|' + s.spec.entry + '|' + (s.file || s.lines) : ck;
     if (seen.has(key)) continue;
     seen.add(key);
-    out.push({ kind: ck, files: s.spec.files, entry: s.spec.entry });
+    out.push({ kind: ck, files: s.spec.files, entry: s.spec.entry, models: s.spec.models });
   }
   return out;
 }
@@ -1676,12 +1937,71 @@ function newModel() {
   renderSideList();
 }
 
+// ---------- 3D: Bild nachbauen ----------
+async function setImg3d(file) {
+  try {
+    S.img3d = await prepareImage(file);
+    renderImg3d();
+    toast('📷 Bild geladen – klick auf „Modell erzeugen“, die KI baut es nach.', 'ok');
+  } catch (err) {
+    toast(err.message, 'err');
+  }
+}
+function renderImg3d() {
+  const im = S.img3d;
+  $('#img3dBtn').hidden = !!im;
+  $('#img3dPrev').hidden = !im;
+  $('#refImg').hidden = !im;
+  if (!im) return;
+  $('#img3dPrev img').src = im.thumb;
+  $('#img3dPrev b').textContent = im.name;
+  $('#img3dPrev span').innerHTML = `Die KI baut das Bild nach <span class="pal">${im.palette.map((c) => `<i style="background:${c}"></i>`).join('')}</span>`;
+  $('#refImg').src = im.thumb;
+}
+$('#img3dBtn').addEventListener('click', () => $('#img3dInput').click());
+$('#img3dInput').addEventListener('change', (e) => {
+  if (e.target.files[0]) setImg3d(e.target.files[0]);
+  e.target.value = '';
+});
+$('#img3dDel').addEventListener('click', () => {
+  S.img3d = null;
+  renderImg3d();
+});
+{
+  const v3 = $('#view3d');
+  v3.addEventListener('dragover', (e) => {
+    if (e.dataTransfer.types.includes('Files')) {
+      e.preventDefault();
+      $('#img3dBox').classList.add('drop');
+    }
+  });
+  v3.addEventListener('dragleave', (e) => {
+    if (!v3.contains(e.relatedTarget)) $('#img3dBox').classList.remove('drop');
+  });
+  v3.addEventListener('drop', (e) => {
+    $('#img3dBox').classList.remove('drop');
+    const f = [...e.dataTransfer.files].find((x) => x.type.startsWith('image/'));
+    if (!f) return;
+    e.preventDefault();
+    setImg3d(f);
+  });
+  // Strg+V: Bild aus der Zwischenablage (3D-Tab → nachbauen, Chat → anhängen)
+  document.addEventListener('paste', (e) => {
+    const f = [...(e.clipboardData ? e.clipboardData.files : [])].find((x) => x.type.startsWith('image/'));
+    if (!f) return;
+    e.preventDefault();
+    if (S.mode === '3d') setImg3d(f);
+    else addFiles([f]);
+  });
+}
+
 async function generate3D(editInstruction) {
   if (S.busy) return;
-  const prompt = $('#prompt3d').value.trim();
-  if (!editInstruction && !prompt) {
+  let prompt = $('#prompt3d').value.trim();
+  const image = !editInstruction ? S.img3d : null;
+  if (!editInstruction && !prompt && !image) {
     $('#prompt3d').focus();
-    return toast('Beschreib zuerst, was gebaut werden soll', 'err');
+    return toast('Beschreib zuerst, was gebaut werden soll – oder gib der KI ein Bild', 'err');
   }
   const viewer = ensureViewer();
   const before = editInstruction ? viewer.model : null;
@@ -1696,11 +2016,32 @@ async function generate3D(editInstruction) {
     maxTokens = Math.min(6000, 400 + src.split('\n').length * 70);
   } else {
     const styles = [...S.styles].join(', ');
-    for (const ex of examplesFor(prompt + ' ' + styles)) {
+    // Bild? Erst ansehen lassen, dann nach der Beschreibung bauen
+    let picture = '';
+    if (image) {
+      setBusy(true);
+      $('#gen3dStatus').hidden = false;
+      $('#genPlan').textContent = '';
+      const r = await describeImage(image, 'model3d', prompt, (t) => ($('#genText').textContent = t));
+      setBusy(false);
+      if (r && r.text) picture = r.text;
+      else {
+        toast('Bild: ' + ((r && r.error) || 'konnte nicht angesehen werden'), 'err');
+        if (!prompt) {
+          $('#gen3dStatus').hidden = true;
+          return;
+        }
+      }
+    }
+    for (const ex of examplesFor(picture + ' ' + prompt + ' ' + styles)) {
       shots.push({ role: 'user', content: `Baue dieses 3D-Modell: ${ex.split('\n')[0].replace(/^name:\s*/, '')}` });
       shots.push({ role: 'assistant', content: ex });
     }
-    userMsg = `Baue dieses 3D-Modell: ${prompt}\n${styles ? `Stil: ${styles}\n` : ''}${DETAIL_LEVELS[S.detail]}\nWenn ein Bauplan (template) passt, fang damit an und ergänze danach Details, die genau an den angegebenen Punkten sitzen.`;
+    userMsg = picture
+      ? `Baue dieses 3D-Modell nach einem Bild nach. So sieht das Bild aus (FORGE hat es sich angesehen):\n${picture}\nHauptfarben im Bild: ${image.palette.join(' ')}\n${prompt ? `Wunsch dazu: ${prompt}\n` : ''}${styles ? `Stil: ${styles}\n` : ''}${DETAIL_LEVELS[S.detail]}\nHalte dich genau an Teile, Proportionen und Farben aus der Beschreibung. Wenn ein Bauplan (template) passt (Figur, Auto, Haus, Tier …), fang damit an und nimm die Farben aus dem Bild.`
+      : `Baue dieses 3D-Modell: ${prompt}\n${styles ? `Stil: ${styles}\n` : ''}${DETAIL_LEVELS[S.detail]}\nWenn ein Bauplan (template) passt, fang damit an und ergänze danach Details, die genau an den angegebenen Punkten sitzen.`;
+    if (picture) $('#genPlan').textContent = '👁 ' + (picture.split('\n').find((l) => /OBJEKT/i.test(l)) || picture.split('\n')[0]).replace(/^OBJEKT:\s*/i, '');
+    if (!prompt) prompt = 'Nach Bild: ' + image.name;
     maxTokens = DETAIL_TOKENS[S.detail] || 1800;
   }
 
@@ -1710,7 +2051,7 @@ async function generate3D(editInstruction) {
   setBusy(true);
   $('#gen3dStatus').hidden = false;
   $('#genText').textContent = editInstruction ? 'Ändere Modell …' : 'Baue das Modell …';
-  $('#genPlan').textContent = '';
+  if (!image) $('#genPlan').textContent = '';
 
   // Live-Aufbau: Jedes fertige Teil erscheint sofort in der 3D-Ansicht
   let text = '';

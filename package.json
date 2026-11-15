@@ -1,13 +1,13 @@
 {
   "name": "forge-ai",
   "productName": "FORGE AI",
-  "version": "1.13.1",
+  "version": "1.14.0",
   "description": "Deine eigene lokale KI für Code und 3D-Modelle – eingebauter KI-Motor, ohne Cloud, ohne API-Key.",
   "main": "boot.js",
   "author": "Du",
   "license": "MIT",
   "scripts": {
-    "build": "esbuild src/app.js --bundle --format=iife --minify --target=chrome130 --outfile=renderer/dist/bundle.js",
+    "build": "esbuild src/app.js --bundle --format=iife --minify --target=chrome130 --outfile=renderer/dist/bundle.js && esbuild src/forge3d-lib.js --bundle --format=esm --external:three --minify --outfile=vendor/forge3d/forge3d.js --log-level=warning",
     "start": "npm run build && electron ."
   },
   "devDependencies": {

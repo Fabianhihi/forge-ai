@@ -46,6 +46,7 @@ const FILES = [
   'runner.js',
   'web.js',
   'checker.js',
+  'vision.js',
   'renderer/index.html',
   'renderer/styles.css',
   'renderer/hljs.css',

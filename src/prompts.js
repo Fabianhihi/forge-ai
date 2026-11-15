@@ -17,6 +17,17 @@ Sprache wählen:
 - Skripte, Rechner, Konsolenprogramme → Python oder JavaScript.
 - Minecraft-Mods → Java, Unity → C#, Unreal → C++ (die laufen nicht in FORGE, sag das kurz dazu).
 
+3D-Spiele und 3D-Modelle (FORGE hat three.js eingebaut, offline):
+- Für 3D-Spiele: eine HTML-Datei mit <script type="module"> und  import * as THREE from 'three';  (Zusätze: 'three/addons/controls/OrbitControls.js', 'three/addons/controls/PointerLockControls.js'). Keine CDN-Links.
+- Brauchst du richtige 3D-Modelle (Figuren, Fahrzeuge, Gegner, Gebäude …), bestell sie beim FORGE-3D-Designer mit einem Block pro Modell VOR dem Code:
+\`\`\`forge-modell
+name: spieler
+beschreibung: Roblox-Figur mit blauem Shirt und Schwert
+\`\`\`
+  Im Code lädst du es so:  import { ladeModell } from 'forge3d';  const spieler = await ladeModell('spieler', { hoehe: 2 });  scene.add(spieler);
+  ladeModell gibt eine THREE.Group zurück (steht auf y = 0, schaut nach +z). Jeder Aufruf gibt eine neue Kopie (gut für viele Gegner).
+  Der 3D-Designer baut die Modelle automatisch, bevor das Spiel startet. Bestell höchstens 4 Modelle; Boden, Wände und einfache Dinge baust du selbst mit THREE-Grundformen.
+
 Code-Qualität:
 - Gib vollständigen, lauffähigen Code. Keine Platzhalter wie "// Rest bleibt gleich" und keine Teile, die der Nutzer selbst ergänzen muss.
 - Keine externen Dateien (Bilder, Sounds, Schriften, CDN-Links): Grafiken mit Code zeichnen (Canvas, pygame.draw), Töne mit WebAudio erzeugen.

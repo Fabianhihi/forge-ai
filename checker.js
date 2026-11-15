@@ -185,8 +185,8 @@ function htmlScripts(file, html) {
 }
 
 // ---------- HTML: unsichtbarer Testlauf ----------
-async function smokeWeb(files, entry, ms = 3500) {
-  const { id, url } = runner.createPreview({ files, entry, test: true });
+async function smokeWeb(files, entry, ms = 3500, models = null) {
+  const { id, url } = runner.createPreview({ files, entry, test: true, models });
   const problems = [];
   const seen = new Set();
   const add = (msg, line, file) => {
@@ -291,7 +291,7 @@ async function check(spec) {
       const syn = await checkJs(dir, src);
       merge(syn, 'Syntax');
       // Testlauf nur, wenn die Syntax stimmt (sonst ist der Fehler schon klar)
-      if (!syn.problems || !syn.problems.length) merge(await smokeWeb(files, spec.entry || 'index.html', spec.ms || 3500), 'Testlauf');
+      if (!syn.problems || !syn.problems.length) merge(await smokeWeb(files, spec.entry || 'index.html', spec.ms || 3500, spec.models), 'Testlauf');
     }
   } catch (err) {
     result.skipped.push('Prüfung fehlgeschlagen: ' + err.message);
