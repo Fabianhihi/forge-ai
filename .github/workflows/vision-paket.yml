@@ -29,14 +29,24 @@ jobs:
             echo "Release $TAG gibt es schon."
             exit 0
           fi
-          gh api "repos/$SRC/releases/latest" > rel.json
+          # Neueste Version mit Windows-Vulkan-Paket suchen (das "latest"-Release ist manchmal nur ein Nightly-Hinweis)
+          gh api "repos/$SRC/releases?per_page=40" > rels.json
           URL=$(python3 -c "
-          import json
-          r = json.load(open('rel.json'))
-          a = [x['browser_download_url'] for x in r['assets'] if x['name'].endswith('$SUFFIX')]
-          print(a[0] if a else '')
+          import json, re
+          suffix = '$SUFFIX'
+          for r in json.load(open('rels.json')):
+              names = [a['name'] for a in r.get('assets', [])]
+              hit = [a['browser_download_url'] for a in r.get('assets', []) if a['name'].endswith(suffix)]
+              if not hit:
+                  hit = [a['browser_download_url'] for a in r.get('assets', []) if re.search(r'win.*vulkan.*x64.*\\.zip$', a['name'])]
+              if hit:
+                  print(hit[0]); break
           ")
-          if [ -z "$URL" ]; then echo "Kein passendes Paket gefunden"; jq -r '.assets[].name' rel.json; exit 1; fi
+          if [ -z "$URL" ]; then echo "Kein passendes Paket gefunden"; python3 -c "
+          import json
+          for r in json.load(open('rels.json'))[:5]:
+              print(r['tag_name'], [a['name'] for a in r.get('assets', [])][:30])
+          "; exit 1; fi
           echo "llama.cpp: $URL"
           curl -fsSL "$URL" -o llama.zip
           mkdir -p x pack/vision
