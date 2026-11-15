@@ -60,6 +60,8 @@ contextBridge.exposeInMainWorld('forge', {
     openFolder: () => ipcRenderer.invoke('engine:openFolder'),
     custom: (bot) => ipcRenderer.invoke('engine:custom', bot),
     setBotModel: (bot, id) => ipcRenderer.invoke('engine:setBotModel', bot, id),
+    bgDownload: (id) => ipcRenderer.invoke('engine:bgDownload', id),
+    bgCancel: () => ipcRenderer.invoke('engine:bgCancel'),
   },
   update: {
     state: () => ipcRenderer.invoke('update:state'),

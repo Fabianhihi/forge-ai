@@ -1,10 +1,10 @@
 {
-  "version": "1.11.0",
+  "version": "1.12.0",
   "runtime": "electron-45.3.2+nlc-3.22.3",
-  "notes": "Neu in 1.11.0: Selbstprüfung! Die Code-KI prüft ihren Code jetzt selbst, bevor du ihn startest: Python auf Syntaxfehler und unbekannte Namen, JavaScript auf Syntax, HTML-Spiele mit einem kurzen unsichtbaren Testlauf (inklusive Klicks und Tastendrücken). Findet FORGE Fehler, behebt die KI sie sofort automatisch (bis zu 2 Runden) und prüft danach nochmal. Unter jeder Antwort siehst du, ob die Prüfung bestanden wurde. Abschaltbar in den Einstellungen.",
+  "notes": "Neu in 1.12.0: Profi-Coder! Der neue Qwen3.6 (35B) ist das stärkste Coding-Modell, das auf deinem PC läuft – viel besserer Code als bisher, und er denkt vor dem Antworten nach (live sichtbar als „Gedankengang“). Er lädt sich einmal im Hintergrund (22 GB), während du ganz normal weiterarbeitest. Danach benutzen Coder und 3D-Designer ihn automatisch. Wie lange er nachdenkt, stellst du in den Einstellungen ein.",
   "app": {
-    "file": "forge-app-1.11.0.json.gz",
-    "sha256": "eda88bac2757464924b6355853cdc6f97a8d2505ddac75a336b9016c270ec17c",
-    "size": 557974
+    "file": "forge-app-1.12.0.json.gz",
+    "sha256": "f53ec10efe625c7e1e8ce6b7e31e4ae8ea69a8c4a64ccaec2c908490d24f69a2",
+    "size": 562733
   }
 }

@@ -438,3 +438,16 @@ body.resizing iframe { pointer-events: none; }
 .selfcheck .check-next { color: #ffb066; font-size: 12.5px; }
 .selfcheck .check-miss { margin-top: 4px; color: var(--muted); font-size: 12px; }
 .selfcheck.muted { font-size: 12px; }
+
+/* ---------- Profi-Coder: Angebot + Download ---------- */
+#upgradeBar { border: 1px solid #3b2d5c; background: #14111d; border-radius: 12px; padding: 10px 11px; display: flex; flex-direction: column; gap: 7px; font-size: 12.5px; margin-bottom: 8px; }
+#upgradeBar .ub-title { font-weight: 600; color: #c4b2ff; }
+#upgradeBar .ub-text { color: var(--muted); line-height: 1.4; }
+#upgradeBar .ub-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+#upgradeBar .ub-prog { height: 6px; border-radius: 3px; background: #241d36; overflow: hidden; }
+#upgradeBar .ub-prog i { display: block; height: 100%; background: linear-gradient(90deg, #8b6cff, #c4b2ff); transition: width 0.4s; }
+/* ---------- Gedankengang ---------- */
+.thought { margin: 2px 0 10px; border-left: 2px solid #3b2d5c; padding: 2px 0 2px 10px; font-size: 12.5px; color: var(--muted); }
+.thought summary { cursor: pointer; display: inline-flex; align-items: center; gap: 6px; user-select: none; }
+.thought summary .muted { opacity: 0.7; }
+.thought-body { margin-top: 6px; white-space: pre-wrap; max-height: 260px; overflow: auto; line-height: 1.45; font-size: 12px; }

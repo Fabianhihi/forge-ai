@@ -156,8 +156,11 @@ function onEngine(st) {
   const wasReady = S.engine && S.engine.status === 'ready';
   if (st.notice && (!S.engine || S.engine.notice !== st.notice)) toast(st.notice, 'err');
   if (st.memNote && st.status === 'ready' && (!S.engine || S.engine.memNote !== st.memNote)) toast(st.memNote);
+  const prevUp = S.engine && S.engine.upgradeReady;
   S.engine = st;
+  if (st.upgradeReady && (!prevUp || prevUp.at !== st.upgradeReady.at)) toast(`🚀 Der Profi-Coder (${st.upgradeReady.params}) ist bereit – Coder und 3D-Designer benutzen ihn ab jetzt.`, 'ok');
   if (S.waitingAi && S.waitingAi.m.waiting) fillAi(S.waitingAi.el, S.waitingAi.m, false, true);
+  renderUpgrade();
   renderStatus();
   updateModelLabels();
   renderEngineOverlay();
@@ -169,6 +172,53 @@ function onEngine(st) {
     forge.engine.preload([{ role: 'system', content: systemPromptFor(ab, S.settings.aiName, { web: S.settings.web }) }]).catch(() => {});
   }
 }
+
+// ---------- Profi-Modell (Qwen3.6): Angebot + Hintergrund-Download ----------
+const fmtGB = (b) => (b / 1e9).toFixed(1).replace('.', ',');
+function renderUpgrade() {
+  const st = S.engine;
+  const bar = $('#upgradeBar');
+  if (!st || !st.catalog) return (bar.hidden = true);
+  const up = st.catalog.find((c) => c.upgrade);
+  const bg = st.bgDownload;
+  let html = '';
+  if (bg && bg.error) {
+    html = `<div class="ub-title">⚠ Download vom Profi-Coder unterbrochen</div><div class="ub-text">${esc(bg.error)}</div><div class="ub-actions"><button class="btn sm primary" data-up="start">Weiter laden</button><button class="btn sm ghost" data-up="cancel">Abbrechen</button></div>`;
+  } else if (bg) {
+    const pct = dlPct(bg);
+    const left = bg.speed > 0 ? Math.max(1, Math.round((bg.total - bg.received) / bg.speed / 60)) : null;
+    html = `<div class="ub-title">🚀 Lade den Profi-Coder … ${pct} %</div><div class="ub-prog"><i style="width:${pct}%"></i></div><div class="ub-text">${fmtGB(bg.received || 0)} von ${fmtGB(bg.total || 0)} GB${left ? ` · noch ca. ${left} min` : ''}<br>Du kannst währenddessen ganz normal weiterarbeiten.</div><div class="ub-actions"><button class="btn sm ghost" data-up="cancel">Abbrechen</button></div>`;
+  } else if (up && !up.installed && localStorage.getItem('forge.upgrade.dismissed') !== up.id) {
+    // Einmal automatisch starten (der Nutzer hat sich das stärkere Modell gewünscht), danach nur noch anbieten
+    if (st.status === 'ready' && !localStorage.getItem('forge.upgrade.auto.' + up.id)) {
+      localStorage.setItem('forge.upgrade.auto.' + up.id, '1');
+      forge.engine.bgDownload(up.id);
+    }
+    html = `<div class="ub-title">🚀 Profi-Coder verfügbar</div><div class="ub-text">Qwen3.6 (${up.params}) – viel besserer Code, denkt vor dem Antworten nach. Einmal ${fmtGB(up.size)} GB laden, im Hintergrund.</div><div class="ub-actions"><button class="btn sm primary" data-up="start">Im Hintergrund laden</button><button class="btn sm ghost" data-up="later">Später</button></div>`;
+  }
+  bar.hidden = !html;
+  if (bar.dataset.html !== html) {
+    bar.dataset.html = html;
+    bar.innerHTML = html;
+  }
+}
+$('#upgradeBar').addEventListener('click', async (e) => {
+  const b = e.target.closest('[data-up]');
+  if (!b) return;
+  const up = S.engine.catalog.find((c) => c.upgrade);
+  if (b.dataset.up === 'start' && up) {
+    localStorage.removeItem('forge.upgrade.dismissed');
+    const r = await forge.engine.bgDownload(up.id);
+    if (r && r.ok === false) toast(r.error || 'Download konnte nicht starten', 'err');
+  } else if (b.dataset.up === 'cancel') {
+    if (up) localStorage.setItem('forge.upgrade.dismissed', up.id);
+    forge.engine.bgCancel();
+    toast('Download abgebrochen – der bisher geladene Teil bleibt gespeichert. Du kannst ihn später im Modell-Menü fortsetzen.');
+  } else if (b.dataset.up === 'later' && up) {
+    localStorage.setItem('forge.upgrade.dismissed', up.id);
+    renderUpgrade();
+  }
+});
 
 function renderStatus() {
   const st = S.engine;
@@ -398,6 +448,11 @@ function fillAi(el, m, final, isLast) {
   const body = $('.body', el);
   let html = '';
   if (m.thinking) html += `<details class="think"><summary>Gedankengang</summary><div>${esc(m.thinking)}</div></details>`;
+  if (m.thought) {
+    const words = m.thought.trim().split(/\s+/).length;
+    const live = !final && !m.content;
+    html += `<details class="thought"${live ? ' open' : ''}><summary>${live ? '<span class="spinner"></span>💭 Denkt nach …' : '💭 Gedankengang'} <span class="muted">(${words} Wörter)</span></summary><div class="thought-body">${esc(live ? m.thought.slice(-1500) : m.thought.slice(-8000))}</div></details>`;
+  }
   if (m.tool && m.tool.phase === 'error') html += `<div class="web-status err">🌐 Internet gerade nicht erreichbar – Antwort ohne Suche</div>`;
   if (m.content) html += `<div class="md ${final ? '' : 'cursor'}">${md.parse(m.content)}</div>`;
   else if (!final && m.tool && webText(m.tool)) html += `<div class="web-status"><span class="spinner"></span>${esc(webText(m.tool))}</div>`;
@@ -546,6 +601,7 @@ async function sendMessage(regenerate = false, preset = null) {
     temperature: bot === 'chat' ? Math.max(0.6, +S.settings.temperature) : +S.settings.temperature,
     bot,
     web: !!S.settings.web,
+    think: S.settings.think || 'short',
   };
   S.waitingAi = { el, m: ai };
   setBusy(true);
@@ -562,6 +618,12 @@ async function sendMessage(regenerate = false, preset = null) {
         ai.tool = d.tool;
       }
       if (d.sources) ai.sources = d.sources;
+      if (d.thought) {
+        ai.waiting = false;
+        ai.thought = ((ai.thought || '') + d.thought).slice(-30000);
+        ai.thinking = true;
+      }
+      if (d.text && ai.thinking) ai.thinking = false;
       if (d.text) {
         ai.waiting = false;
         ai.content += d.text;
@@ -1795,6 +1857,10 @@ function renderModels() {
         actions = `<div class="row-btns"><button class="btn sm primary" data-a="use" data-id="${c.id}">Für ${esc(BOTS[tab].name)} verwenden</button>${
           c.active || c.usedBy.length ? '' : `<button class="btn sm ghost" data-a="del" data-id="${c.id}" title="Vom PC löschen">${I.trash}</button>`
         }</div>`;
+      } else if (c.upgrade && st.bgDownload && st.bgDownload.id === c.id) {
+        actions = `<span class="muted small">🚀 Lädt im Hintergrund … ${dlPct(st.bgDownload)} %</span>`;
+      } else if (c.upgrade) {
+        actions = `<button class="btn sm primary" data-a="use" data-id="${c.id}">🚀 Im Hintergrund laden (${fmtGB(c.size)} GB)</button>`;
       } else {
         actions = `<button class="btn sm" data-a="use" data-id="${c.id}">${I.save} Optional: herunterladen &amp; verwenden</button>`;
       }
@@ -2068,6 +2134,7 @@ function openSettings() {
     <p>Alles bleibt auf deinem PC.</p>
     <div class="field"><label>Name deiner KI</label><input id="sName" maxlength="24" value="${esc(st.aiName)}"></div>
     <div class="two">
+      <div class="field"><label>💭 Nachdenken vor dem Antworten <span class="hint" style="display:inline">(nur Profi-Coder Qwen3.6)</span></label><select id="sThink"><option value="off" ${st.think === 'off' ? 'selected' : ''}>Aus – am schnellsten</option><option value="short" ${!st.think || st.think === 'short' ? 'selected' : ''}>Kurz – guter Mittelweg (empfohlen)</option><option value="deep" ${st.think === 'deep' ? 'selected' : ''}>Gründlich – langsamer, beste Ergebnisse</option></select></div>
       <div class="field"><label>Kreativität: <span id="tVal">${String(st.temperature).replace('.', ',')}</span></label><input id="sTemp" type="range" min="0" max="1.2" step="0.05" value="${st.temperature}"><span class="hint">Niedrig = genauer Code, hoch = kreativer</span></div>
       <div class="field"><label>Gedächtnis (Kontext)</label><select id="sCtx">${[4096, 8192, 16384, 32768]
         .map((n) => `<option value="${n}" ${n === ctx ? 'selected' : ''}>${n.toLocaleString('de-DE')} Token${n === 8192 ? ' (empfohlen)' : n === 4096 ? ' (spart Speicher)' : ''}</option>`)
@@ -2128,6 +2195,7 @@ $('#settingsBody').addEventListener('click', async (e) => {
     st.aiName = $('#sName').value.trim().slice(0, 24) || 'FORGE';
     st.temperature = +$('#sTemp').value;
     st.autoFix = $('#sAutoFix').checked;
+    st.think = $('#sThink').value;
     st.selfCheck = $('#sSelfCheck').checked;
     st.web = $('#sWeb').checked;
     st.runTrusted = $('#sTrust').checked;

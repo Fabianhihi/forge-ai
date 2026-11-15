@@ -56,10 +56,28 @@ const CATALOG = [
     params: '30B',
     file: 'Qwen3-Coder-30B-A3B-Instruct-Q4_K_M.gguf',
     size: 18.6e9,
-    desc: 'Das beste lokale Coding-Modell. Für 24-GB-Grafikkarten oder 32 GB+ RAM (dann langsamer).',
+    desc: 'Älteres großes Coding-Modell (Qwen3-Coder). „Profi“ ist neuer und besser.',
     urls: [
       hf('lmstudio-community/Qwen3-Coder-30B-A3B-Instruct-GGUF', 'Qwen3-Coder-30B-A3B-Instruct-Q4_K_M.gguf'),
       hf('unsloth/Qwen3-Coder-30B-A3B-Instruct-GGUF', 'Qwen3-Coder-30B-A3B-Instruct-Q4_K_M.gguf'),
+    ],
+  },
+  {
+    id: 'profi',
+    kind: 'code',
+    title: 'Profi',
+    params: '35B',
+    file: 'Qwen3.6-35B-A3B-UD-Q4_K_M.gguf',
+    size: 22.1e9,
+    ctx: 16384,
+    thinks: true,
+    upgrade: true,
+    minRamGB: 28,
+    desc: 'Qwen3.6 – das stärkste Coding-Modell, das auf deinem PC läuft. Denkt vor dem Antworten nach. Braucht 32 GB RAM (läuft teils im Arbeitsspeicher).',
+    urls: [
+      hf('unsloth/Qwen3.6-35B-A3B-GGUF', 'Qwen3.6-35B-A3B-UD-Q4_K_M.gguf'),
+      hf('bartowski/Qwen_Qwen3.6-35B-A3B-GGUF', 'Qwen_Qwen3.6-35B-A3B-Q4_K_M.gguf'),
+      hf('lmstudio-community/Qwen3.6-35B-A3B-GGUF', 'Qwen3.6-35B-A3B-Q4_K_M.gguf'),
     ],
   },
   // ---------- Allround-Modelle für den Chat-Bot ----------
@@ -106,6 +124,7 @@ const CATALOG = [
 // Nur für Tests: kleine Modelle per Umgebungsvariable einspielen
 if (process.env.FORGE_TEST_MODEL) {
   CATALOG.unshift({ id: 'test', kind: 'code', title: 'Test-Coder', params: 'tiny', file: 'tiny-test.gguf', size: 84018656, desc: 'Testmodell', urls: [process.env.FORGE_TEST_MODEL] });
+  if (process.env.FORGE_TEST_UPGRADE) CATALOG.push({ id: 'test-profi', kind: 'code', title: 'Test-Profi', params: 'tiny', file: 'tiny-test-profi.gguf', size: 84018656, thinks: true, upgrade: true, minRamGB: 1, ctx: 4096, desc: 'Testmodell (Upgrade)', urls: [process.env.FORGE_TEST_UPGRADE] });
   CATALOG.unshift({ id: 'test-chat', kind: 'chat', title: 'Test-Chat', params: 'tiny', file: 'tiny-test-chat.gguf', size: 84018656, desc: 'Testmodell', urls: [process.env.FORGE_TEST_MODEL] });
 }
 
@@ -264,7 +283,9 @@ class Engine extends EventEmitter {
         installed: this.isInstalled(c),
         active: activeId === c.id,
         recommended: hw && c.id === this.recommendedId(c.kind),
-        downloading: !!(this.state.download && this.state.download.id === c.id),
+        downloading: !!(this.state.download && this.state.download.id === c.id) || !!(this.state.bgDownload && this.state.bgDownload.id === c.id),
+        thinks: !!c.thinks,
+        upgrade: !!(c.upgrade && hw && (this.state.hardware.ramGB || 0) >= (c.minRamGB || 0)),
         usedBy: BOTS.filter((b) => botModels[b] === c.id),
       })),
     };
@@ -332,6 +353,12 @@ class Engine extends EventEmitter {
         active = { id: 'custom', title: 'Eigenes Modell', params: path.basename(modelPath, '.gguf'), bot: activeBot };
       } else {
         const entry = CATALOG.find((c) => c.id === id);
+        if (!this.isInstalled(entry) && this.bgJob && this.config.bgDownloadId === entry.id) {
+          // Wird gerade im Hintergrund geladen → darauf warten statt doppelt zu laden
+          this.set({ status: 'downloading', message: `Lade KI-Modell „${entry.title}“ herunter …`, download: this.state.bgDownload });
+          await this.bgJob;
+          if (run !== this.runId) return;
+        }
         if (!this.isInstalled(entry)) {
           await this.download(entry, run);
           if (run !== this.runId) return;
@@ -346,6 +373,7 @@ class Engine extends EventEmitter {
       }
       await this.load(modelPath, active, run);
       this.loadedPath = modelPath;
+      this._resumeBackground();
     } catch (err) {
       if (run !== this.runId) return;
       if (err.name === 'AbortError' || err.code === 'ABORT_ERR') {
@@ -372,6 +400,9 @@ class Engine extends EventEmitter {
   // Für einen Bot ein Modell festlegen (lädt es bei Bedarf herunter, wenn der Bot gerade aktiv ist)
   async setBotModel(bot, id) {
     if (!BOTS.includes(bot)) return false;
+    const entry = CATALOG.find((c) => c.id === id);
+    // Großes Modell, das noch fehlt → im Hintergrund laden, die aktuelle KI bleibt solange benutzbar
+    if (entry && entry.upgrade && !this.isInstalled(entry)) return this.downloadBackground(id).ok;
     this.config.botModels[bot] = id;
     this.config.botExplicit[bot] = true; // selbst gewählt → darf auch heruntergeladen werden
     this.saveConfig();
@@ -408,7 +439,7 @@ class Engine extends EventEmitter {
   deleteModel(id) {
     const entry = CATALOG.find((c) => c.id === id);
     if (!entry) return false;
-    if (this.loadedPath === this.modelPath(entry) || (this.state.download && this.state.download.id === id)) return false;
+    if (this.loadedPath === this.modelPath(entry) || (this.state.download && this.state.download.id === id) || (this.bgJob && this.config.bgDownloadId === id)) return false;
     fs.rmSync(this.modelPath(entry), { force: true });
     fs.rmSync(this.modelPath(entry) + '.part', { force: true });
     this.set({});
@@ -425,22 +456,95 @@ class Engine extends EventEmitter {
     }
   }
 
+  // ---------- Großes Modell im Hintergrund laden (die aktuelle KI bleibt so lange benutzbar) ----------
+  downloadBackground(id) {
+    const entry = CATALOG.find((c) => c.id === id);
+    if (!entry) return { ok: false, error: 'Unbekanntes Modell' };
+    if (this.isInstalled(entry)) {
+      this._adoptUpgrade(entry);
+      return { ok: true, done: true };
+    }
+    if (this.bgJob) return { ok: true, running: true };
+    if (this.downloadAbort) return { ok: false, error: 'Gerade läuft schon ein anderer Download.' };
+    this.config.bgDownloadId = id;
+    this.saveConfig();
+    this.log('info', `Hintergrund-Download gestartet: ${entry.title} (${entry.params})`);
+    this.set({ bgDownload: { id: entry.id, title: entry.title, params: entry.params, received: 0, total: entry.size, speed: 0 } });
+    this.bgJob = this.download(entry, null, { background: true })
+      .then(() => {
+        this.config.bgDownloadId = null;
+        this.saveConfig();
+        this.log('info', `Hintergrund-Download fertig: ${entry.title}`);
+        this._adoptUpgrade(entry);
+      })
+      .catch((err) => {
+        const aborted = err && (err.name === 'AbortError' || err.code === 'ABORT_ERR');
+        if (aborted) {
+          this.config.bgDownloadId = null;
+          this.saveConfig();
+          this.set({ bgDownload: null });
+        } else {
+          this.log('warn', 'Hintergrund-Download fehlgeschlagen: ' + (err && err.message));
+          this.set({ bgDownload: { ...(this.state.bgDownload || { id: entry.id, title: entry.title, params: entry.params }), error: friendly(err) } });
+        }
+      })
+      .finally(() => {
+        this.bgJob = null;
+      });
+    return { ok: true };
+  }
+
+  cancelBackground() {
+    this.config.bgDownloadId = null;
+    this.saveConfig();
+    if (this.bgAbort) this.bgAbort.abort();
+    else this.set({ bgDownload: null });
+    return true;
+  }
+
+  // Fertig geladenes Profi-Modell für Coder und 3D-Designer übernehmen
+  _adoptUpgrade(entry) {
+    for (const b of ['code', 'design']) {
+      this.config.botModels[b] = entry.id;
+      this.config.botExplicit[b] = true;
+    }
+    this.saveConfig();
+    this.set({ bgDownload: null, upgradeReady: { id: entry.id, title: entry.title, params: entry.params, at: Date.now() } });
+    if (['code', 'design'].includes(this.config.activeBot) && this.state.status !== 'downloading') this.start(this.config.activeBot);
+  }
+
+  _resumeBackground() {
+    const id = this.config.bgDownloadId;
+    if (!id || this.bgJob) return;
+    const entry = CATALOG.find((c) => c.id === id);
+    if (!entry) return;
+    setTimeout(() => this.downloadBackground(id), 3000);
+  }
+
   // ---------- Download mit Fortsetzen ----------
-  async download(entry, run) {
+  async download(entry, run, { background = false } = {}) {
     const dest = this.modelPath(entry);
     const part = dest + '.part';
     const free = this.freeDiskGB();
-    if (free != null && entry.size / GB + 0.5 > free) {
+    let have = 0;
+    try {
+      have = fs.statSync(part).size;
+    } catch {}
+    if (free != null && (entry.size - have) / GB + 0.5 > free) {
       throw new Error(`Nicht genug Speicherplatz: ${entry.title}-Modell braucht ${(entry.size / GB).toFixed(1)} GB, frei sind ${free.toFixed(1)} GB.`);
     }
     const ac = new AbortController();
-    this.downloadAbort = ac;
+    if (background) this.bgAbort = ac;
+    else this.downloadAbort = ac;
+    const progress = background
+      ? (d) => this.set({ bgDownload: { id: entry.id, title: entry.title, params: entry.params, ...d } })
+      : (d) => this.set({ status: 'downloading', message: `Lade KI-Modell „${entry.title}“ herunter …`, download: { id: entry.id, title: entry.title, params: entry.params, ...d } });
     let lastErr;
     try {
       for (const url of entry.urls) {
         for (let attempt = 0; attempt < 4; attempt++) {
           try {
-            await this._downloadOnce(url, part, entry, ac.signal);
+            await this._downloadOnce(url, part, entry, ac.signal, progress);
             const fd = fs.openSync(part, 'r');
             const magic = Buffer.alloc(4);
             fs.readSync(fd, magic, 0, 4, 0);
@@ -450,7 +554,7 @@ class Engine extends EventEmitter {
               throw new Error('Die heruntergeladene Datei ist kein gültiges Modell.');
             }
             fs.renameSync(part, dest);
-            this.set({ download: null });
+            this.set(background ? { bgDownload: null } : { download: null });
             return;
           } catch (err) {
             if (ac.signal.aborted) throw Object.assign(new Error('abgebrochen'), { name: 'AbortError' });
@@ -463,10 +567,11 @@ class Engine extends EventEmitter {
       throw lastErr || new Error('Download fehlgeschlagen');
     } finally {
       if (this.downloadAbort === ac) this.downloadAbort = null;
+      if (this.bgAbort === ac) this.bgAbort = null;
     }
   }
 
-  async _downloadOnce(url, part, entry, signal) {
+  async _downloadOnce(url, part, entry, signal, progress) {
     let start = 0;
     try {
       start = fs.statSync(part).size;
@@ -505,11 +610,7 @@ class Engine extends EventEmitter {
             speed = speed ? speed * 0.6 + s * 0.4 : s;
             speedBase = { t: now, b: received };
           }
-          this.set({
-            status: 'downloading',
-            message: `Lade KI-Modell „${entry.title}“ herunter …`,
-            download: { id: entry.id, title: entry.title, params: entry.params, received, total, speed },
-          });
+          progress({ received, total, speed });
         }
       }
     } finally {
@@ -545,7 +646,8 @@ class Engine extends EventEmitter {
     const onLoadProgress = (p) => {
       if (run === this.runId) this.set({ loadProgress: Math.round(p * 100) });
     };
-    const want = Math.max(4096, this.config.ctx || 8192);
+    const loadEntry = CATALOG.find((c) => active && c.id === active.id);
+    const want = Math.max(4096, this.config.ctxUserSet ? this.config.ctx || 8192 : Math.max(this.config.ctx || 8192, (loadEntry && loadEntry.ctx) || 0));
 
     // Wie viele Schichten hat das Modell? (für die Speicher-Stufen unten)
     let totalLayers = null;
@@ -599,7 +701,8 @@ class Engine extends EventEmitter {
     const onGpu = this.model.gpuLayers;
     const share = totalLayers ? Math.min(100, Math.round((onGpu / totalLayers) * 100)) : onGpu > 0 ? 100 : 0;
     let memNote = null;
-    if (this.llama.gpu && share < 100) {
+    const bigModel = loadEntry && loadEntry.upgrade; // läuft absichtlich teils im RAM
+    if (this.llama.gpu && share < 100 && !bigModel) {
       memNote =
         share === 0
           ? 'Die Grafikkarte war voll – die KI läuft gerade nur im Arbeitsspeicher (langsamer). Schließ Spiele oder andere Programme und starte FORGE neu.'
@@ -689,6 +792,7 @@ Nicht suchen bei: normalem Programmieren, Erklären von Grundlagen, Plaudern, Re
       grammar,
       temperature: 0,
       maxTokens: 80,
+      budgets: { thoughtTokens: 0 },
       signal,
       stopOnAbortSignal: true,
     });
@@ -772,7 +876,11 @@ Nicht suchen bei: normalem Programmieren, Erklären von Grundlagen, Plaudern, Re
     return job;
   }
 
-  async _chat({ messages, temperature = 0.3, schema, gbnf, maxTokens, bot, web: useWeb }, onText, signal) {
+  loadedEntry() {
+    return this.loadedPath ? CATALOG.find((c) => this.modelPath(c) === this.loadedPath) || null : null;
+  }
+
+  async _chat({ messages, temperature = 0.3, schema, gbnf, maxTokens, bot, web: useWeb, think = 'short' }, onText, signal) {
     // Anderer Bot mit anderem Modell? Dann zuerst umschalten (ggf. mit Download).
     if (bot && BOTS.includes(bot)) {
       const aborted = new Promise((r) => signal.addEventListener('abort', r, { once: true }));
@@ -806,7 +914,15 @@ Nicht suchen bei: normalem Programmieren, Erklären von Grundlagen, Plaudern, Re
       return null;
     })();
     if (testReply != null) {
-      const reply = testReply;
+      let reply = testReply;
+      const th = /^<think>([\s\S]*?)<\/think>\s*/.exec(reply);
+      if (th) {
+        reply = reply.slice(th[0].length);
+        for (let i = 0; i < th[1].length; i += 10) {
+          onText(null, { thought: th[1].slice(i, i + 10) });
+          await new Promise((r) => setTimeout(r, 8));
+        }
+      }
       for (let i = 0; i < reply.length; i += 12) {
         onText(reply.slice(i, i + 12));
         await new Promise((r) => setTimeout(r, 5));
@@ -834,18 +950,35 @@ Nicht suchen bei: normalem Programmieren, Erklären von Grundlagen, Plaudern, Re
     }
     let tokens = 0;
     let tFirst = 0;
-    await this.session.prompt(last.content, {
+    // Denkende Modelle (Qwen3.6): erst nachdenken, dann antworten – Gedanken werden live angezeigt.
+    // Bei festen Formaten (3D, JSON) wird nicht nachgedacht.
+    const entry = this.loadedEntry();
+    const thinks = !!(entry && entry.thinks);
+    const thoughtBudget = !thinks || grammar ? 0 : { off: 0, short: 700, deep: 2500 }[think] ?? 700;
+    const opts = {
       temperature,
       maxTokens: maxTokens || undefined,
       grammar,
       signal,
       stopOnAbortSignal: true,
+      budgets: { thoughtTokens: thoughtBudget },
       onTextChunk: (t) => onText(t),
       onToken: (toks) => {
         if (!tFirst) tFirst = Date.now();
         tokens += toks.length;
       },
-    });
+    };
+    if (thinks) {
+      // Empfohlene Einstellungen für Qwen3.6 beim Programmieren (zu niedrige Temperatur führt zu Endlosschleifen)
+      if (!grammar) opts.temperature = Math.max(0.6, temperature);
+      opts.topP = 0.95;
+      opts.topK = 20;
+      if (thoughtBudget)
+        opts.onResponseChunk = (ch) => {
+          if (ch && ch.type === 'segment' && ch.segmentType === 'thought' && ch.text) onText(null, { thought: ch.text });
+        };
+    }
+    await this.session.prompt(last.content, opts);
     const secs = tFirst ? (Date.now() - tFirst) / 1000 : 0;
     return { aborted: signal.aborted, tps: secs > 0.2 ? tokens / secs : 0, tokens };
   }
