@@ -83,6 +83,7 @@ contextBridge.exposeInMainWorld('forge', {
     stop: (id) => ipcRenderer.invoke('run:stop', id),
     pip: (id, module) => ipcRenderer.invoke('run:pip', id, module),
     install: (lang) => ipcRenderer.invoke('run:install', lang),
+    check: (spec) => ipcRenderer.invoke('run:check', spec),
     openFile: () => ipcRenderer.invoke('run:openFile'),
     onEvent: (fn) => {
       runListeners.add(fn);

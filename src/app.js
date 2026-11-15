@@ -374,7 +374,10 @@ function userEl(m) {
   if (m.auto) {
     d.classList.add('auto');
     const err = m.content.replace(/^[\s\S]*?```\n?/, '').replace(/```[\s\S]*$/, '').trim();
-    d.innerHTML = `<div><div class="bubble"><b>🔧 Automatische Reparatur${m.attempt ? ` (Versuch ${m.attempt}/${MAX_REPAIR})` : ''}</b><span>Beim Ausführen kam ein Fehler – die KI behebt ihn selbst.</span><details><summary>Fehlermeldung</summary><pre>${esc(err.slice(-1500))}</pre></details></div></div>`;
+    d.innerHTML =
+      m.kind === 'check'
+        ? `<div><div class="bubble"><b>🔍 Selbstprüfung${m.attempt ? ` (Runde ${m.attempt}/${MAX_CHECK})` : ''}</b><span>Vor dem Start wurden Fehler gefunden – die KI behebt sie selbst.</span><details><summary>Gefundene Fehler</summary><pre>${esc(err.slice(-1500))}</pre></details></div></div>`
+        : `<div><div class="bubble"><b>🔧 Automatische Reparatur${m.attempt ? ` (Versuch ${m.attempt}/${MAX_REPAIR})` : ''}</b><span>Beim Ausführen kam ein Fehler – die KI behebt ihn selbst.</span><details><summary>Fehlermeldung</summary><pre>${esc(err.slice(-1500))}</pre></details></div></div>`;
     return d;
   }
   const files = (m.files || []).map((f) => `<span class="file-pill">${esc(f.name)}</span>`).join('');
@@ -403,6 +406,7 @@ function fillAi(el, m, final, isLast) {
   if (m.error) {
     html += `<div class="err-box">${esc(m.error.replace('NO_MODEL: ', ''))}<div><button class="btn sm" data-act="setup">KI-Modelle öffnen</button></div></div>`;
   }
+  if (final && m.check) html += checkHtml(m);
   if (m.sources && m.sources.length && (m.content || final)) {
     html += `<div class="sources"><span class="lbl">🌐 Quellen</span>${m.sources
       .slice(0, 8)
@@ -502,7 +506,7 @@ async function sendMessage(regenerate = false, preset = null) {
   let conv = currentConv();
   if (preset) {
     if (!conv) return null;
-    conv.messages.push(preset.auto ? { role: 'user', content: text, auto: true, attempt: preset.attempt || 0 } : { role: 'user', content: text });
+    conv.messages.push(preset.auto ? { role: 'user', content: text, auto: true, kind: preset.kind || 'repair', attempt: preset.attempt || 0 } : { role: 'user', content: text });
   } else if (!regenerate) {
     if (!text && !S.attachments.length) return null;
     if (!conv) conv = newConv();
@@ -582,6 +586,11 @@ async function sendMessage(regenerate = false, preset = null) {
     saveConvs();
     if (nearBottom()) scrollBottom(true);
   }
+  // Selbstprüfung: Fehler finden, bevor der Nutzer startet – und gleich beheben lassen
+  if (!ai.error && !ai.stopped && ai.content && bot !== 'design' && S.settings.selfCheck !== false) {
+    const fixed = await selfCheck(conv, ai, el, (preset && preset.checkRound) || 0);
+    if (fixed) return fixed;
+  }
   return { conv, ai, el };
 }
 
@@ -592,6 +601,16 @@ $('#messages').addEventListener('click', async (e) => {
   const act = btn.dataset.act;
   if (act === 'setup') return openModels();
   if (act === 'src') return forge.openExternal(btn.dataset.url);
+  if (act === 'fixcheck') {
+    const conv = currentConv();
+    const msgEl = btn.closest('.msg');
+    const idx = $$('#messages > .msg').indexOf(msgEl);
+    const m = conv && conv.messages[idx];
+    if (!m || !m.check || S.busy) return;
+    m.check.fixing = true;
+    fillAi(msgEl, m, true, idx === conv.messages.length - 1);
+    return fixCheckProblems(m, Math.min((m.check.round || 0) + 1, MAX_CHECK));
+  }
   if (act === 'regen') return sendMessage(true);
   if (act === 'copyall') {
     const conv = currentConv();
@@ -844,18 +863,14 @@ function filesFromMessage(cb) {
   return files;
 }
 
-function runFromBlock(cb, attempt = 0) {
-  const conv0 = currentConv();
-  RUN.origin = conv0 ? { convId: conv0.id, attempt, file: cb.dataset.file || '', lang: cb.dataset.lang || '' } : null;
-  RUN.pipTried = new Set();
+// Aus einem Codeblock (plus den anderen Dateien der Antwort) ein startbares Paket machen
+function specFromBlock(cb) {
   const code = $('code', cb).textContent;
   const lang = cb.dataset.lang;
   const file = cb.dataset.file ? cb.dataset.file.split(/[\\/]/).pop() : '';
   const kind = runKind(lang, code, file);
-  if (!kind) return toast('Diesen Code kann FORGE nicht direkt ausführen.', 'err');
+  if (!kind) return null;
   const files = filesFromMessage(cb);
-  const conv = currentConv();
-  const title = (conv && conv.title) || file || LANG_NAME[kind];
   if (kind === 'web') {
     let entry = file || 'index.html';
     let html = code;
@@ -864,7 +879,7 @@ function runFromBlock(cb, attempt = 0) {
       entry = 'index.html';
     }
     files[entry] = html;
-    return runWeb({ files, entry }, title, 'web');
+    return { kind, file, lines: code.split('\n').length, spec: { files, entry } };
   }
   if (kind === 'webjs') {
     const js = file || 'main.js';
@@ -872,11 +887,106 @@ function runFromBlock(cb, attempt = 0) {
     if (!files['index.html']) {
       files['index.html'] = `<!doctype html><html><head><meta charset="utf-8"><style>html,body{margin:0;height:100%;background:#111;color:#eee;font-family:system-ui,sans-serif}canvas{display:block}</style></head><body><canvas id="canvas" width="800" height="600"></canvas><canvas id="game" width="800" height="600" style="display:none"></canvas><script src="${js}"></script></body></html>`;
     }
-    return runWeb({ files, entry: 'index.html' }, title, 'webjs');
+    return { kind, file, lines: code.split('\n').length, spec: { files, entry: 'index.html' } };
   }
   const entry = file || 'main.' + LANG_EXT[kind];
   files[entry] = code;
-  runProgram({ lang: kind, files, entry }, title);
+  return { kind, file, lines: code.split('\n').length, spec: { lang: kind, files, entry } };
+}
+
+function runFromBlock(cb, attempt = 0) {
+  const conv0 = currentConv();
+  RUN.origin = conv0 ? { convId: conv0.id, attempt, file: cb.dataset.file || '', lang: cb.dataset.lang || '' } : null;
+  RUN.pipTried = new Set();
+  const s = specFromBlock(cb);
+  if (!s) return toast('Diesen Code kann FORGE nicht direkt ausführen.', 'err');
+  const title = (conv0 && conv0.title) || s.file || LANG_NAME[s.kind];
+  if (s.kind === 'web' || s.kind === 'webjs') return runWeb(s.spec, title, s.kind);
+  runProgram(s.spec, title);
+}
+
+// ======================================================================
+//        Selbstprüfung: Code prüfen, bevor er gestartet wird
+// ======================================================================
+const MAX_CHECK = 2;
+const CHECKABLE = { python: 'python', javascript: 'javascript', typescript: 'typescript', web: 'web', webjs: 'web' };
+
+// Welche Codeblöcke einer Antwort sind „richtige“ Programme? (mit Dateinamen oder groß genug – keine Schnipsel)
+function checkSpecs(el) {
+  const out = [];
+  const seen = new Set();
+  const blocks = $$('.codeblock', el);
+  for (const cb of blocks) {
+    const s = specFromBlock(cb);
+    if (!s || !CHECKABLE[s.kind]) continue;
+    const ck = CHECKABLE[s.kind];
+    if (!s.file && s.lines < 8) continue;
+    const key = ck === 'web' ? 'web|' + s.spec.entry + '|' + (s.file || s.lines) : ck;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({ kind: ck, files: s.spec.files, entry: s.spec.entry });
+  }
+  return out;
+}
+
+// Fehlermeldungen für Menschen (die KI bekommt das Original)
+function problemText(p) {
+  let m = String(p.msg);
+  m = m
+    .replace(/^undefined name '(.+)'$/, '„$1“ ist nirgends definiert')
+    .replace(/^local variable '(.+)' defined .* referenced before assignment$/, '„$1“ wird benutzt, bevor es einen Wert hat')
+    .replace(/^(\w*Error): (.+) is not defined$/, '$1: „$2“ ist nicht definiert')
+    .replace(/^'return' outside function$/, '„return“ steht außerhalb einer Funktion');
+  return `${p.file ? p.file : ''}${p.line ? ' Zeile ' + p.line : ''}${p.file || p.line ? ': ' : ''}${m}`;
+}
+
+async function selfCheck(conv, ai, el, round) {
+  const specs = checkSpecs(el);
+  if (!specs.length) return null;
+  ai.check = { status: 'running', round };
+  fillAi(el, ai, true, true);
+  const errors = [];
+  const missing = [];
+  const checked = new Set();
+  const skipped = new Set();
+  for (const spec of specs) {
+    const r = await forge.run.check(spec);
+    (r.checked || []).forEach((c) => checked.add(c));
+    (r.skipped || []).forEach((c) => skipped.add(c));
+    for (const p of r.problems || []) (p.kind === 'missing' ? missing : errors).push(p);
+  }
+  ai.check = { status: errors.length ? 'problems' : checked.size ? 'ok' : 'skipped', errors, missing, checked: [...checked], skipped: [...skipped], round };
+  const auto = errors.length && S.settings.autoFix !== false && round < MAX_CHECK && currentConv() && currentConv().id === conv.id && !S.busy;
+  if (auto) ai.check.fixing = true;
+  saveConvs();
+  if (el.isConnected) fillAi(el, ai, true, conv.messages[conv.messages.length - 1] === ai);
+  if (!auto) return null;
+  return fixCheckProblems(ai, round + 1);
+}
+
+function fixCheckProblems(ai, round) {
+  const list = (ai.check.errors || [])
+    .slice(0, 12)
+    .map((p) => `${p.file || 'Code'}${p.line ? ' Zeile ' + p.line : ''}: ${p.msg}`)
+    .join('\n');
+  const text = `🔍 Selbstprüfung: In deinem Code wurden Fehler gefunden, bevor er gestartet wurde:\n\`\`\`\n${list}\n\`\`\`\nBehebe genau diese Fehler und gib den KOMPLETTEN korrigierten Code aus (alle Dateien, gleiche Dateinamen).`;
+  return sendMessage(false, { text, auto: true, kind: 'check', attempt: round, checkRound: round });
+}
+
+function checkHtml(m) {
+  const c = m.check;
+  if (!c) return '';
+  if (c.status === 'running') return `<div class="selfcheck run"><span class="spinner"></span>🔍 Prüft den Code, bevor du ihn startest (Syntax, Namen, Testlauf) …</div>`;
+  const miss = c.missing && c.missing.length ? `<div class="check-miss">📦 ${esc([...new Set(c.missing.map((p) => p.module))].join(', '))} wird beim ersten Start automatisch installiert.</div>` : '';
+  if (c.status === 'ok') return `<div class="selfcheck ok">✓ Selbstprüfung bestanden <span>· ${esc(c.checked.join(', '))}</span>${miss}</div>`;
+  if (c.status === 'skipped') return c.skipped.length ? `<div class="selfcheck muted">Nicht geprüft: ${esc(c.skipped.join(' · '))}</div>` : '';
+  const items = c.errors
+    .slice(0, 8)
+    .map((p) => `<li>${esc(problemText(p))}</li>`)
+    .join('');
+  return `<div class="selfcheck bad"><b>⚠ Selbstprüfung: ${c.errors.length} ${c.errors.length === 1 ? 'Fehler' : 'Fehler'} gefunden – noch bevor du startest</b><ul>${items}</ul>${
+    c.fixing ? '<div class="check-next">🔧 Die KI behebt das automatisch – siehe unten ↓</div>' : '<button class="btn sm primary" data-act="fixcheck">🔧 Von der KI beheben lassen</button>'
+  }${miss}</div>`;
 }
 
 async function runWeb(spec, title, lang = 'web') {
@@ -1965,6 +2075,7 @@ function openSettings() {
     </div>
     <div class="field"><label>KI-Modell</label><div class="edit-row"><input value="${esc(activeLabel())}" disabled><button class="btn" data-a="models">Ändern</button></div></div>
     <div class="field checks">
+      <label class="check"><input type="checkbox" id="sSelfCheck" ${st.selfCheck !== false ? 'checked' : ''}> 🔍 Selbstprüfung: Die KI prüft ihren Code (Syntax, Namen, kurzer Testlauf), bevor du ihn startest</label>
       <label class="check"><input type="checkbox" id="sAutoFix" ${st.autoFix !== false ? 'checked' : ''}> 🔧 Automatische Reparatur: Wenn Code beim Ausführen abstürzt, behebt die KI den Fehler selbst und startet neu (bis zu ${MAX_REPAIR}×)</label>
       <label class="check"><input type="checkbox" id="sWeb" ${st.web ? 'checked' : ''}> 🌐 Internet-Suche: Die KI darf selbst im Netz nachschauen</label>
       <label class="check"><input type="checkbox" id="sTrust" ${st.runTrusted ? 'checked' : ''}> Programme ohne Nachfrage ausführen</label>
@@ -2017,6 +2128,7 @@ $('#settingsBody').addEventListener('click', async (e) => {
     st.aiName = $('#sName').value.trim().slice(0, 24) || 'FORGE';
     st.temperature = +$('#sTemp').value;
     st.autoFix = $('#sAutoFix').checked;
+    st.selfCheck = $('#sSelfCheck').checked;
     st.web = $('#sWeb').checked;
     st.runTrusted = $('#sTrust').checked;
     saveSettings();

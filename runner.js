@@ -52,12 +52,16 @@ function handleProtocol() {
       if (!pv) return new Response('Diese Vorschau gibt es nicht mehr.', { status: 404 });
       const rel = rest.join('/') || pv.entry;
       let body = findFile(pv, rel);
-      if (body == null) return new Response('Datei nicht gefunden: ' + rel, { status: 404 });
+      if (body == null) {
+        if (pv.missing && !/favicon\.ico$/i.test(rel)) pv.missing.add(rel);
+        return new Response('Datei nicht gefunden: ' + rel, { status: 404 });
+      }
       const ext = (rel.split('.').pop() || '').toLowerCase();
       const type = MIME[ext] || 'application/octet-stream';
       if (type === 'text/html') {
         let html = Buffer.isBuffer(body) ? body.toString('utf8') : String(body);
-        html = /<head[^>]*>/i.test(html) ? html.replace(/<head[^>]*>/i, (m) => m + CONSOLE_HOOK) : CONSOLE_HOOK + html;
+        const hook = pv.test ? TEST_HOOK + CONSOLE_HOOK : CONSOLE_HOOK;
+        html = /<head[^>]*>/i.test(html) ? html.replace(/<head[^>]*>/i, (m) => m + hook) : hook + html;
         body = html;
       }
       return new Response(body, { headers: { 'Content-Type': type + (type.startsWith('text') || type.endsWith('json') ? '; charset=utf-8' : ''), 'Cache-Control': 'no-store' } });
@@ -67,11 +71,21 @@ function handleProtocol() {
   });
 }
 
-function createPreview({ files = {}, entry, baseDir = null }) {
+// Testlauf der Selbstprüfung: keine Popups, keine neuen Fenster
+const TEST_HOOK = `<script>(()=>{window.alert=()=>{};window.confirm=()=>true;window.prompt=(m,d)=>d||'';window.open=()=>null;})();</script>`;
+
+function createPreview({ files = {}, entry, baseDir = null, test = false }) {
   const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
-  previews.set(id, { files, entry, baseDir });
+  previews.set(id, { files, entry, baseDir, test, missing: test ? new Set() : null });
   while (previews.size > 30) previews.delete(previews.keys().next().value);
   return { id, url: `forge-run://preview/${id}/${encodeURI(entry)}` };
+}
+
+function previewInfo(id) {
+  return previews.get(id) || null;
+}
+function dropPreview(id) {
+  previews.delete(id);
 }
 
 function openPreviewWindow(url) {
@@ -498,4 +512,4 @@ function setLogger(log) {
   if (log) pyLog = log;
 }
 
-module.exports = { registerScheme, handleProtocol, createPreview, openPreviewWindow, publicRuntimes, start, input, stop, stopAll, pipInstall, installRuntime, prefetchPython, forgePythonReady, setLogger };
+module.exports = { detectRuntimes, previewInfo, dropPreview, ensurePython, registerScheme, handleProtocol, createPreview, openPreviewWindow, publicRuntimes, start, input, stop, stopAll, pipInstall, installRuntime, prefetchPython, forgePythonReady, setLogger };

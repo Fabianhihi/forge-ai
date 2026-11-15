@@ -45,12 +45,20 @@ const FILES = [
   'engine-worker.js',
   'runner.js',
   'web.js',
+  'checker.js',
   'renderer/index.html',
   'renderer/styles.css',
   'renderer/hljs.css',
   'renderer/icon.png',
   'renderer/dist/bundle.js',
 ];
+
+// Mitgelieferte Hilfsprogramme (z. B. pyflakes für die Selbstprüfung)
+const walk = (dir) =>
+  fs.existsSync(path.join(ROOT, dir))
+    ? fs.readdirSync(path.join(ROOT, dir), { withFileTypes: true }).flatMap((d) => (d.name === '__pycache__' ? [] : d.isDirectory() ? walk(dir + '/' + d.name) : [dir + '/' + d.name]))
+    : [];
+FILES.push(...walk('vendor'));
 
 const sha = (buf) => crypto.createHash('sha256').update(buf).digest('hex');
 

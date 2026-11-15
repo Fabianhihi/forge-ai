@@ -1,10 +1,10 @@
 {
-  "version": "1.10.0",
+  "version": "1.11.0",
   "runtime": "electron-45.3.2+nlc-3.22.3",
-  "notes": "Neu in 1.10.0: Der Coder ist besser und braucht keine Downloads mehr. Alle Bots benutzen das Modell, das schon auf deinem PC ist – kein extra Modell-Download beim Bot-Wechsel. FORGE hat jetzt ein eingebautes Python (mit pygame, numpy, pillow, requests), das sich einmal automatisch im Hintergrund einrichtet – Python-Programme und -Spiele starten ohne Installation. Fehlende Python-Pakete werden automatisch nachinstalliert. Neue automatische Reparatur: Stürzt Code beim Ausführen ab, behebt die KI den Fehler selbst und startet ihn neu. Der Coder schreibt jetzt bevorzugt Code, der in FORGE sofort läuft.",
+  "notes": "Neu in 1.11.0: Selbstprüfung! Die Code-KI prüft ihren Code jetzt selbst, bevor du ihn startest: Python auf Syntaxfehler und unbekannte Namen, JavaScript auf Syntax, HTML-Spiele mit einem kurzen unsichtbaren Testlauf (inklusive Klicks und Tastendrücken). Findet FORGE Fehler, behebt die KI sie sofort automatisch (bis zu 2 Runden) und prüft danach nochmal. Unter jeder Antwort siehst du, ob die Prüfung bestanden wurde. Abschaltbar in den Einstellungen.",
   "app": {
-    "file": "forge-app-1.10.0.json.gz",
-    "sha256": "54c6bc4be872e63b10b0b53223f3d43a000d1c0d4e8b976da64fb4490010e832",
-    "size": 512660
+    "file": "forge-app-1.11.0.json.gz",
+    "sha256": "eda88bac2757464924b6355853cdc6f97a8d2505ddac75a336b9016c270ec17c",
+    "size": 557974
   }
 }

@@ -30,6 +30,7 @@ Format:
 - Danach 2–4 kurze Sätze: was der Code macht und wie man ihn bedient. In FORGE startet man ihn mit dem Knopf „Ausführen“ bzw. „Öffnen“ am Codeblock.
 
 Fehler beheben:
+- Wenn eine Nachricht mit 🔍 beginnt, hat FORGE deinen Code vor dem Start geprüft (Syntax, unbekannte Namen, kurzer Testlauf) und Fehler gefunden. Behebe genau diese Fehler, ohne den Rest kaputtzumachen, und gib den KOMPLETTEN Code mit denselben Dateinamen aus.
 - Wenn eine Nachricht mit 🔧 beginnt, ist das ein Fehlerbericht von FORGE nach dem Ausführen. Erkläre die Ursache in 1–2 Sätzen und gib dann den KOMPLETTEN korrigierten Code mit demselben Dateinamen aus. Ändere nur, was nötig ist.
 - Fehlt ein Modul, das es im eingebauten Python nicht gibt, schreib den Code so um, dass er ohne dieses Modul auskommt.
 - Wenn du dir bei etwas unsicher bist, sag es ehrlich.`;

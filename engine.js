@@ -794,9 +794,19 @@ Nicht suchen bei: normalem Programmieren, Erklären von Grundlagen, Plaudern, Re
       if (signal.aborted) return { aborted: true };
     }
     if (signal.aborted) return { aborted: true };
-    // Nur für automatische Tests: feste Antwort auf Reparatur-Anfragen
-    if (process.env.FORGE_TEST_REPLY_FILE && /^[🔧🔁]/u.test(String(messages[messages.length - 1].content || ''))) {
-      const reply = fs.readFileSync(process.env.FORGE_TEST_REPLY_FILE, 'utf8');
+    // Nur für automatische Tests: feste Antworten (Datei mit {"Regex": "Antwort"} oder eine Antwort für Reparaturen)
+    const testReply = (() => {
+      const q = String(messages[messages.length - 1].content || '');
+      if (process.env.FORGE_TEST_REPLIES) {
+        const map = JSON.parse(fs.readFileSync(process.env.FORGE_TEST_REPLIES, 'utf8'));
+        const k = Object.keys(map).find((re) => new RegExp(re, 'u').test(q));
+        return k ? map[k] : null;
+      }
+      if (process.env.FORGE_TEST_REPLY_FILE && /^[🔧🔁🔍]/u.test(q)) return fs.readFileSync(process.env.FORGE_TEST_REPLY_FILE, 'utf8');
+      return null;
+    })();
+    if (testReply != null) {
+      const reply = testReply;
       for (let i = 0; i < reply.length; i += 12) {
         onText(reply.slice(i, i + 12));
         await new Promise((r) => setTimeout(r, 5));

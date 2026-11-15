@@ -6,6 +6,7 @@ const fs = require('fs');
 const os = require('os');
 
 const runner = require('./runner');
+const checker = require('./checker');
 runner.registerScheme(); // muss vor app.ready passieren
 
 let win = null;
@@ -400,6 +401,14 @@ ipcMain.handle('run:pip', async (e, id, module) => {
   }
 });
 ipcMain.handle('run:install', (_e, lang) => runner.installRuntime(String(lang)));
+// Selbstprüfung: Code der KI prüfen, bevor er gestartet wird
+ipcMain.handle('run:check', async (_e, spec) => {
+  try {
+    return await checker.check(spec || {});
+  } catch (err) {
+    return { problems: [], checked: [], skipped: ['Prüfung fehlgeschlagen: ' + err.message] };
+  }
+});
 ipcMain.handle('run:openFile', async () => {
   const { canceled, filePaths } = await dialog.showOpenDialog(win, {
     title: 'Datei zum Ausführen öffnen',
