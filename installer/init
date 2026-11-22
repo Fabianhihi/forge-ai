@@ -155,8 +155,8 @@ echo
 echo "$L"
 echo "  ✔  Vela Secure wurde erfolgreich installiert!"
 echo
-echo "  Du kannst den USB-Stick jetzt abziehen."
 echo "  Der Pi startet in 15 Sekunden neu in Vela."
+echo "  (Den USB-Stick kannst du jetzt abziehen – musst du aber nicht.)"
 echo "$L"
 sleep 15
 sync
