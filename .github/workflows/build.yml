@@ -6,6 +6,7 @@ name: Vela Secure – Offline-Installer bauen
 on:
   push:
     branches: [vela-build]
+    paths-ignore: ['.github/workflows/publish.yml']
   workflow_dispatch: {}
 
 permissions:

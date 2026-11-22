@@ -1,0 +1,32 @@
+name: Vela – Installer als Entwurf bereitstellen
+
+# Holt den fertigen Offline-Installer aus einem Bau-Lauf und legt ihn in einen
+# ENTWURFS-Release (nur für den Besitzer sichtbar; FORGE-AI-Updates bleiben unberührt).
+on:
+  push:
+    branches: [vela-build]
+    paths: ['.github/workflows/publish.yml']
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: vela-offline-installer
+          run-id: 45045475433
+          github-token: ${{ github.token }}
+          path: out
+      - name: Entwurfs-Release erstellen
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ls -la out
+          gh release create vela-offline-draft --repo "$GITHUB_REPOSITORY" --draft \
+            --target vela-build --title "Vela Secure – Offline-Installer (Entwurf)" \
+            --notes "Nur zum Herunterladen. Wird danach wieder gelöscht." \
+            "out/vela-installer.run" "out/Vela installieren.desktop"
