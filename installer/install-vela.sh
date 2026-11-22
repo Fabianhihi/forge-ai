@@ -85,9 +85,29 @@ if [ "$ARG" = "--worker" ]; then
   mkdir -p "$DIR"
 
   built_ok() {
-    [ -f "$DIR/$IMG" ] && [ -f "$DIR/$IMG.size" ] && [ -f "$DIR/$IMG.sha256" ] && \
-    [ -f "$DIR/vela-installer-$ARCH.gz" ] && \
-    [ "$(stat -c%s "$DIR/$IMG")" = "$(cat "$DIR/$IMG.size")" ]
+    [ -f "$DIR/.fertig" ] && [ -f "$DIR/$IMG.xz" ] && [ -f "$DIR/$IMG.size" ] && \
+    [ -f "$DIR/$IMG.sha256" ] && [ -f "$DIR/vela-installer-$ARCH.gz" ]
+  }
+
+  # Raspberry Pi OS aufräumen: große, unnötige Programme und Datenmüll löschen
+  # (die SD-Karte wird danach sowieso komplett durch Vela ersetzt)
+  cleanup_pios() {
+    st "Raspberry Pi OS wird aufgeräumt (unnötige Programme löschen) ..."
+    apt-mark manual network-manager wpasupplicant dhcpcd5 dhcpcd curl ca-certificates sudo >/dev/null 2>&1 || true
+    BIG="$(dpkg-query -W -f='${db:Status-Abbrev} ${Package}\n' 2>/dev/null | awk '$1=="ii" {print $2}' | grep -E \
+      '^(libreoffice.*|wolfram-engine|wolframscript|scratch.*|nuscratch|sonic-pi.*|minecraft-pi|smartsim|chromium|chromium-browser|chromium-codecs-ffmpeg.*|chromium-common|rpi-chromium-mods|firefox|firefox-esr|rpi-firefox-mods|vlc|vlc-.*|code|mu-editor|thonny|geany|geany-common|claws-mail|bluej|greenfoot.*|nodered|python3-pygame|gimp|gimp-data|rp-bookshelf|piwiz|rpi-imager|realvnc-vnc-viewer|blender|blender-data|kicad|kicad-.*)$' || true)"
+    if [ -n "$BIG" ]; then
+      echo "Lösche: $BIG" | tr '\n' ' '; echo
+      # shellcheck disable=SC2086
+      DEBIAN_FRONTEND=noninteractive apt-get purge -y -q $BIG || true
+    fi
+    apt-get clean || true
+    journalctl --vacuum-size=8M >/dev/null 2>&1 || true
+    rm -rf /var/cache/apt/*.bin /var/cache/man/* /home/*/.cache/* /root/.cache/* \
+           /var/log/*.gz /var/log/*.[0-9] /var/crash/* /usr/share/doc/* /usr/share/man/* \
+           /home/*/.local/share/Trash/* 2>/dev/null || true
+    sync
+    st "Aufgeräumt – frei auf der SD-Karte: $(df -h --output=avail / | tail -1 | tr -d ' ')"
   }
 
   if [ "$MODE" = IMAGE ]; then
@@ -103,16 +123,24 @@ if [ "$ARG" = "--worker" ]; then
     rm -rf "$DIR/src"; mkdir -p "$DIR/src"
     tail -n +"$LINE" "$SELF" | tar -x -C "$DIR/src" || wdie "Auspacken fehlgeschlagen."
     if ! built_ok; then
+      cleanup_pios
+      FREE_SD=$(df -B1 --output=avail /var/tmp | tail -1)
+      [ "$FREE_SD" -ge 1800000000 ] || wdie "Zu wenig Platz auf der SD-Karte – auch nach dem Aufräumen (mind. 1,8 GB frei nötig, also eine SD-Karte ab 8 GB)."
+
       st "Werkzeuge werden installiert ..."
-      PKGS="debootstrap debian-archive-keyring parted dosfstools e2fsprogs xz-utils curl gpg gpgv nftables cpio"
+      PKGS="debootstrap debian-archive-keyring parted dosfstools e2fsprogs fdisk xz-utils curl gpg gpgv nftables cpio"
       [ "$(uname -m)" = aarch64 ] || PKGS="$PKGS qemu-user-static binfmt-support"
       apt-get update -q || wdie "apt-get update fehlgeschlagen – ist der Pi mit dem Internet verbunden?"
       # shellcheck disable=SC2086
       DEBIAN_FRONTEND=noninteractive apt-get install -y -q $PKGS || wdie "Werkzeuge konnten nicht installiert werden."
 
       st "Vela wird gebaut ..."
-      rm -f "$DIR/$IMG" "$DIR/$IMG.size" "$DIR/$IMG.sha256"
-      ( cd "$DIR" && LOCAL_INSTALL_DIR="$DIR" WORK=/var/tmp/vela-build bash "$DIR/src/build.sh" ) > /var/tmp/vela-build.log 2>&1 &
+      rm -f "$DIR/$IMG" "$DIR/$IMG.xz" "$DIR/$IMG.size" "$DIR/$IMG.sha256" "$DIR/.fertig"
+      rm -rf /var/tmp/vela-build; mkdir -p /var/tmp/vela-build
+      # Gebaut wird auf der SD-Karte (spart Platz auf dem Stick), am Ende kommt
+      # nur das komprimierte Image (~400 MB) auf den Stick.
+      ( cd /var/tmp/vela-build && LOCAL_INSTALL_DIR="$DIR" WORK=/var/tmp/vela-build \
+          OUT=/var/tmp/vela-build/vela-secure-pi3.img bash "$DIR/src/build.sh" ) > /var/tmp/vela-build.log 2>&1 &
       BP=$!
       while kill -0 "$BP" 2>/dev/null; do
         STEP="$(grep -a '\[vela\]' /var/tmp/vela-build.log 2>/dev/null | tail -1 | sed 's/\x1b\[[0-9;]*m//g; s/^\[vela\] *//' || true)"
@@ -174,10 +202,8 @@ esac
 if ! systemctl is-active -q "$UNIT"; then
   if ! grep -aq '^__VELA_PAYLOAD_IMAGE__$' <(head -c 300000 "$SELF"); then
     FREE_STICK=$(df -B1 --output=avail "$STICK" | tail -1)
-    [ "$FREE_STICK" -ge 2600000000 ] || [ -f "$DIR/$IMG" ] || die "Zu wenig Platz auf dem USB-Stick (mind. 2,6 GB frei – also ein Stick ab 4 GB)."
-    FREE_SD=$(df -B1 --output=avail /var/tmp | tail -1)
-    [ "$FREE_SD" -ge 1000000000 ] || [ -f "$DIR/$IMG" ] || die "Zu wenig Platz auf der SD-Karte (mind. 1 GB frei zum Bauen)."
-    [ -f "$DIR/$IMG" ] || curl -fsI --max-time 15 https://deb.debian.org >/dev/null 2>&1 \
+    [ "$FREE_STICK" -ge 700000000 ] || [ -f "$DIR/.fertig" ] || die "Zu wenig Platz auf dem USB-Stick (mind. 700 MB frei – ein Stick ab 1 GB reicht)."
+    [ -f "$DIR/.fertig" ] || curl -fsI --max-time 15 https://deb.debian.org >/dev/null 2>&1 \
       || die "Keine Internetverbindung. Bitte LAN-Kabel oder WLAN verbinden und nochmal starten."
   fi
 
@@ -185,8 +211,9 @@ if ! systemctl is-active -q "$UNIT"; then
   red  "  Vela ersetzt jetzt Raspberry Pi OS auf der SD-Karte."
   red  "  Alles auf der SD-Karte wird gelöscht."
   echo
-  echo "  Du musst nichts mehr tun. Der Installer baut Vela (falls nötig, ca. 1–2 Std.),"
-  echo "  startet den Pi neu, installiert Vela und startet dann Vela."
+  echo "  Du musst nichts mehr tun. Der Installer räumt Raspberry Pi OS auf (löscht"
+  echo "  unnötige Programme), baut Vela (ca. 1–2 Std.), startet den Pi neu,"
+  echo "  installiert Vela und startet dann Vela."
   echo "  Du kannst dieses Fenster auch schließen – es läuft trotzdem weiter."
   echo
   trap 'echo; echo; green "  Abgebrochen – nichts wurde verändert."; pause_end; exit 1' INT

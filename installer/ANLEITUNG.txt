@@ -6,7 +6,9 @@ Sichere vorher, was du behalten willst!
 
 DU BRAUCHST
    - Raspberry Pi 3 mit Raspberry Pi OS
-   - einen USB-Stick ab 4 GB, als FAT32 formatiert
+   - einen USB-Stick ab 1 GB, als FAT32 formatiert
+   - eine SD-Karte ab 8 GB (der Installer löscht vorher unnötige Programme
+     von Raspberry Pi OS wie LibreOffice, Chromium, Scratch usw.)
    - Internet am Pi (LAN-Kabel oder WLAN)
 
 SO GEHT'S
@@ -16,6 +18,7 @@ SO GEHT'S
 2. Stecke den Stick in den Pi und klicke doppelt auf "Vela installieren"
    (wenn gefragt: "Ausführen").
 3. Fertig – den Rest macht der Installer allein:
+      - Raspberry Pi OS aufräumen (unnötige Programme löschen)
       - Vela bauen (ca. 1–2 Stunden)
       - Pi neu starten
       - Vela auf die SD-Karte schreiben und prüfen (3–8 Minuten)

@@ -33,7 +33,7 @@ say() { printf '\n\033[1;35m[vela]\033[0m %s\n' "$*"; }
 die() { printf '\n\033[1;31m[vela] FEHLER:\033[0m %s\n' "$*" >&2; exit 1; }
 
 [ "$(id -u)" = 0 ] || die "Bitte mit sudo starten: sudo ./build.sh"
-for t in debootstrap parted mkfs.vfat mkfs.ext4 losetup xz curl gpg gpgv fstrim; do
+for t in debootstrap parted mkfs.vfat mkfs.ext4 losetup xz curl gpg gpgv fstrim sfdisk resize2fs dumpe2fs e2fsck; do
   command -v "$t" >/dev/null || die "Programm fehlt: $t"
 done
 if [ "$(dpkg --print-architecture 2>/dev/null || uname -m)" != arm64 ] && [ "$(uname -m)" != aarch64 ]; then
@@ -597,7 +597,24 @@ echo "Vela Secure (Tor Browser $TB_VERSION) – gebaut $(date -u +%F)" > "$ROOT/
 df -h "$ROOT" | tail -1
 fstrim "$ROOT" || true
 sync
-cleanup; LOOP=""; trap - EXIT
+cleanup; LOOP=""
+
+# --- Image auf die belegte Größe schrumpfen (wächst beim 1. Start wieder) ---
+say "     Image verkleinern"
+LOOP="$(losetup -fP --show "$OUT")"; sleep 1
+e2fsck -fy "${LOOP}p2" >/dev/null 2>&1 || true
+resize2fs -M "${LOOP}p2" >/dev/null 2>&1
+BS=$(dumpe2fs -h "${LOOP}p2" 2>/dev/null | awk -F: '/^Block size/ {gsub(/ /,"",$2); print $2}')
+BC=$(dumpe2fs -h "${LOOP}p2" 2>/dev/null | awk -F: '/^Block count/ {gsub(/ /,"",$2); print $2}')
+BC=$(( BC + 64*1024*1024 / BS ))          # 64 MB Reserve für den ersten Start
+resize2fs "${LOOP}p2" "$BC" >/dev/null 2>&1
+losetup -d "$LOOP"; LOOP=""
+P2_START=$(( 260 * 1024 * 1024 / 512 ))
+P2_SECT=$(( BC * BS / 512 + 2048 ))
+echo "$P2_START,$P2_SECT" | sfdisk -q -N 2 --no-reread "$OUT" >/dev/null
+truncate -s $(( (P2_START + P2_SECT) * 512 )) "$OUT"
+say "     Image-Größe: $(( (P2_START + P2_SECT) * 512 / 1024 / 1024 )) MB"
+trap - EXIT
 
 IMG_BYTES=$(stat -c%s "$OUT")
 IMG_SHA="$(sha256sum "$OUT" | cut -d' ' -f1)"
@@ -622,10 +639,13 @@ make_initramfs() {  # $1 = Zielordner
 if [ -n "${LOCAL_INSTALL_DIR:-}" ]; then
   say "Installer-Dateien auf den USB-Stick schreiben"
   make_initramfs "$LOCAL_INSTALL_DIR"
-  [ "$(cd "$(dirname "$OUT")" && pwd)/$(basename "$OUT")" = "$LOCAL_INSTALL_DIR/vela-secure-pi3.img" ] || \
-    mv "$OUT" "$LOCAL_INSTALL_DIR/vela-secure-pi3.img"
+  # Leicht komprimiert auf den Stick (wenig Speicher, wenig RAM)
+  say "Image komprimieren und auf den USB-Stick schreiben"
+  xz -1 -T1 --check=crc32 -c "$OUT" > "$LOCAL_INSTALL_DIR/vela-secure-pi3.img.xz"
+  rm -f "$OUT"
   echo "$IMG_SHA  vela-secure-pi3.img" > "$LOCAL_INSTALL_DIR/vela-secure-pi3.img.sha256"
   echo "$IMG_BYTES" > "$LOCAL_INSTALL_DIR/vela-secure-pi3.img.size"
+  : > "$LOCAL_INSTALL_DIR/.fertig"
   sync
   say "Fertig gebaut."
   exit 0
