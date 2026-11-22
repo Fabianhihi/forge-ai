@@ -4,20 +4,42 @@
 #  Läuft unter Raspberry Pi OS (32- oder 64-Bit).
 #
 #  Diese EINE Datei enthält alles (Vela-Image + Installer).
-#  Starten:   sudo bash /media/<name>/<STICK>/vela-installer.run
+#  Starten:   Doppelklick -> "Ausführen", oder im Terminal:
+#             sudo bash /media/*/*/vela-installer.run
 #  Rückgängig (vor dem Neustart):   sudo bash vela-installer.run --undo
 # =====================================================================
 set -euo pipefail
 SELF="$(readlink -f "$0")"
 DIR="$(dirname "$SELF")/.vela-installer"
 IMG=vela-secure-pi3.img
+LOGF="$(dirname "$SELF")/vela-installer.log"
+GUI=0
+if [ "${1:-}" = "--gui" ]; then GUI=1; shift; fi
+echo "$(date '+%F %T') Start – Terminal: $(tty -s && tty || echo keins), Benutzer: $(id -un), Argumente: $*" >> "$LOGF" 2>/dev/null || true
+
+# Per Doppelklick (ohne Terminal) gestartet? -> selbst ein Terminal-Fenster öffnen
+if [ ! -t 0 ] || [ ! -t 1 ]; then
+  for T in lxterminal x-terminal-emulator; do
+    command -v "$T" >/dev/null 2>&1 && exec "$T" -e "bash '$SELF' --gui"
+  done
+  command -v foot  >/dev/null 2>&1 && exec foot bash "$SELF" --gui
+  command -v xterm >/dev/null 2>&1 && exec xterm -e bash "$SELF" --gui
+  echo "$(date '+%F %T') Kein Terminal-Programm gefunden" >> "$LOGF" 2>/dev/null
+  exit 1
+fi
 
 red()   { printf '\033[1;31m%s\033[0m\n' "$*"; }
 green() { printf '\033[1;32m%s\033[0m\n' "$*"; }
 lila()  { printf '\033[1;35m%s\033[0m\n' "$*"; }
-die()   { echo; red "  FEHLER: $*"; echo; exit 1; }
+pause_end() { if [ "$GUI" = 1 ]; then echo; read -r -p "  Enter drücken, um das Fenster zu schließen ..." _ || true; fi; }
+die()   { echo; red "  FEHLER: $*"; echo "$(date '+%F %T') FEHLER: $*" >> "$LOGF" 2>/dev/null || true; echo; pause_end; exit 1; }
 
-[ "$(id -u)" = 0 ] || exec sudo bash "$SELF" "$@"
+if [ "$(id -u)" != 0 ]; then
+  echo "  Vela-Installer braucht Administratorrechte (sudo) ..."
+  if [ "$GUI" = 1 ]; then exec sudo bash "$SELF" --gui "$@"; else exec sudo bash "$SELF" "$@"; fi
+fi
+# Alle Ausgaben zusätzlich auf dem Stick mitschreiben (für die Fehlersuche)
+exec > >(tee -a "$LOGF") 2>&1
 
 BOOT=/boot/firmware
 [ -f "$BOOT/config.txt" ] || BOOT=/boot
@@ -30,7 +52,7 @@ if [ "${1:-}" = "--undo" ]; then
   done
   rm -f "$BOOT/vela-installer.gz"; sync
   green "  Rückgängig gemacht – der Pi startet wieder normal Raspberry Pi OS."
-  exit 0
+  pause_end; exit 0
 fi
 
 clear
@@ -44,7 +66,7 @@ echo "  Gerät:        $MODEL"
 case "$MODEL" in
   *"Raspberry Pi 3"*) ;;
   *) red "  Achtung: Vela ist für den Raspberry Pi 3 gemacht."
-     read -r -p "  Trotzdem weitermachen? (j/n) " a; [ "$a" = j ] || exit 1 ;;
+     read -r -p "  Trotzdem weitermachen? (j/n) " a; [ "$a" = j ] || { pause_end; exit 1; } ;;
 esac
 
 ROOTDEV="$(findmnt -no SOURCE /)"
@@ -154,7 +176,7 @@ red   "  und durch Vela Secure ersetzt. Raspberry Pi OS und alle Dateien"
 red   "  darauf sind danach weg. Sichere vorher, was du behalten willst!"
 echo
 read -r -p "  Zum Fortfahren VELA eintippen: " OK
-[ "$OK" = VELA ] || { echo "  Abgebrochen – nichts wurde verändert."; exit 1; }
+[ "$OK" = VELA ] || { echo "  Abgebrochen – nichts wurde verändert."; pause_end; exit 1; }
 
 # --- Installer für den nächsten Start einrichten ---
 cp "$DIR/vela-installer-$ARCH.gz" "$BOOT/vela-installer.gz"
@@ -171,5 +193,5 @@ echo "  Vela (etwa 3–8 Minuten). Danach startet Vela von selbst."
 echo "  Vor dem Neustart kannst du noch abbrechen: sudo bash $SELF --undo"
 echo
 read -r -p "  Jetzt neu starten? (j/n) " R
-if [ "$R" = j ]; then reboot; else echo "  Starte später mit:  sudo reboot"; fi
+if [ "$R" = j ]; then reboot; else echo "  Starte später mit:  sudo reboot"; pause_end; fi
 exit 0

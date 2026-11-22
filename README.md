@@ -47,7 +47,7 @@ Lade aus dem neuesten GitHub-Release die Datei **`vela-installer.run`** herunter
 
 1. Kopiere `vela-installer.run` auf einen USB-Stick (FAT32, mindestens 2 GB).
 2. Stecke den Stick in den Pi mit Raspberry Pi OS. Es geht mit dem Pi 3 B und B+ und mit 32- und 64-Bit-Systemen. Tippe im Terminal:
-   `sudo bash /media/$USER/*/vela-installer.run`
+   `sudo bash /media/*/*/vela-installer.run`
 3. Tippe `VELA` ein und starte neu. Der Installer schreibt Vela auf die SD-Karte, prüft es und startet Vela.
    In den ersten 15 Sekunden kannst du mit einer Taste abbrechen.
 
