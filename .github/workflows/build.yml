@@ -33,9 +33,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           TAG="v$(date -u +%Y.%m.%d-%H%M)"
-          sudo chown "$(id -u)" vela-installer.run vela-secure-pi3.img.xz vela-secure-pi3.img.xz.sha256
+          sudo chown "$(id -u)" vela-installer.run vela-secure-pi3.img.xz vela-secure-pi3.img.xz.sha256 "Vela installieren.desktop"
           gh release create "$TAG" \
             --title "Vela Secure $TAG" \
-            --notes "**vela-installer.run** – auf einen USB-Stick kopieren und am Raspberry Pi starten (sudo bash vela-installer.run).
+            --notes "**Offline-Installer:** vela-installer.run und \"Vela installieren.desktop\" auf einen USB-Stick (FAT32, ab 2 GB) kopieren, am Pi doppelt auf \"Vela installieren\" klicken – kein Internet nötig.
           **vela-secure-pi3.img.xz** – alternativ mit dem Raspberry Pi Imager flashen." \
-            vela-installer.run vela-secure-pi3.img.xz vela-secure-pi3.img.xz.sha256
+            vela-installer.run "Vela installieren.desktop" vela-secure-pi3.img.xz vela-secure-pi3.img.xz.sha256

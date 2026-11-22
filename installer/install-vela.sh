@@ -200,7 +200,12 @@ case "$FS" in
 esac
 
 if ! systemctl is-active -q "$UNIT"; then
-  if ! grep -aq '^__VELA_PAYLOAD_IMAGE__$' <(head -c 300000 "$SELF"); then
+  if grep -aq '^__VELA_PAYLOAD_IMAGE__$' <(head -c 300000 "$SELF"); then
+    # Offline-Installer: Vela ist schon komplett in dieser Datei – kein Internet nötig
+    echo "  Modus:     Offline (Vela ist schon im Installer enthalten)"
+    FREE_STICK=$(df -B1 --output=avail "$STICK" | tail -1)
+    [ "$FREE_STICK" -ge 500000000 ] || [ -f "$DIR/$IMG.xz" ] || die "Zu wenig Platz auf dem USB-Stick (mind. 500 MB frei neben dem Installer – Stick ab 2 GB)."
+  else
     FREE_STICK=$(df -B1 --output=avail "$STICK" | tail -1)
     [ "$FREE_STICK" -ge 700000000 ] || [ -f "$DIR/.fertig" ] || die "Zu wenig Platz auf dem USB-Stick (mind. 700 MB frei – ein Stick ab 1 GB reicht)."
     [ -f "$DIR/.fertig" ] || curl -fsI --max-time 15 https://deb.debian.org >/dev/null 2>&1 \
@@ -211,9 +216,8 @@ if ! systemctl is-active -q "$UNIT"; then
   red  "  Vela ersetzt jetzt Raspberry Pi OS auf der SD-Karte."
   red  "  Alles auf der SD-Karte wird gelöscht."
   echo
-  echo "  Du musst nichts mehr tun. Der Installer räumt Raspberry Pi OS auf (löscht"
-  echo "  unnötige Programme), baut Vela (ca. 1–2 Std.), startet den Pi neu,"
-  echo "  installiert Vela und startet dann Vela."
+  echo "  Du musst nichts mehr tun. Der Installer bereitet alles vor, startet den Pi"
+  echo "  neu, installiert Vela und startet dann Vela."
   echo "  Du kannst dieses Fenster auch schließen – es läuft trotzdem weiter."
   echo
   trap 'echo; echo; green "  Abgebrochen – nichts wurde verändert."; pause_end; exit 1' INT
