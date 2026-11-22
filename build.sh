@@ -91,7 +91,7 @@ parted -s "$OUT" mklabel msdos \
 LOOP="$(losetup -fP --show "$OUT")"
 sleep 1
 mkfs.vfat -F 32 -n RASPIFIRM "${LOOP}p1" >/dev/null
-mkfs.ext4 -q -L RASPIROOT "${LOOP}p2"
+mkfs.ext4 -q -L RASPIROOT -i 16384 -J size=32 "${LOOP}p2"
 mkdir -p "$ROOT"
 mount "${LOOP}p2" "$ROOT"
 
@@ -634,6 +634,7 @@ for _ in 1 2 3 4 5; do [ -b "${LOOP}p2" ] && break; sleep 1; done
 [ -b "${LOOP}p2" ] || die "Partition ${LOOP}p2 nicht gefunden"
 e2fsck -fy "${LOOP}p2" || true
 resize2fs -M "${LOOP}p2" || die "Verkleinern fehlgeschlagen"
+for _ in 1 2 3; do e2fsck -fy "${LOOP}p2" >/dev/null 2>&1 || true; resize2fs -M "${LOOP}p2" 2>&1 | grep -v '^resize2fs' || true; done
 BS=$(dumpe2fs -h "${LOOP}p2" 2>/dev/null | awk -F: '/^Block size/ {gsub(/ /,"",$2); print $2}')
 BC=$(dumpe2fs -h "${LOOP}p2" 2>/dev/null | awk -F: '/^Block count/ {gsub(/ /,"",$2); print $2}')
 BC=$(( BC + 64*1024*1024 / BS ))          # 64 MB Reserve für den ersten Start
