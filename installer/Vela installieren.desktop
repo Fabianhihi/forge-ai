@@ -5,6 +5,6 @@ Name=Vela installieren
 Name[de]=Vela installieren
 Comment=Installiert Vela Secure auf diesem Raspberry Pi
 Icon=system-software-install
-Exec=bash -c 'f=""; for c in "$(dirname "$0")/vela-installer.run" /media/*/*/vela-installer.run /media/*/vela-installer.run /run/media/*/*/vela-installer.run /mnt/*/vela-installer.run; do if [ -f "$c" ]; then f="$c"; break; fi; done; if [ -z "$f" ]; then echo; echo "  vela-installer.run wurde auf dem USB-Stick nicht gefunden."; echo "  Bitte beide Dateien auf den Stick kopieren."; echo; read -r -p "  Enter zum Schliessen ..." x; exit 1; fi; exec bash "$f" --gui' %k
+Exec=bash -c 'f=""; for c in "$(dirname "$0")"/* /media/*/*/* /media/*/* /run/media/*/*/* /mnt/*/*; do if [ -f "$c" ] && head -c 300000 "$c" 2>/dev/null | grep -aqE "^__VELA_PAYLOAD_(IMAGE|SOURCE)__$"; then f="$c"; break; fi; done; if [ -z "$f" ]; then echo; echo "  Der Vela-Installer wurde auf dem USB-Stick nicht gefunden."; echo "  Auf dem Stick liegen gerade diese Dateien:"; echo; ls -la /media/*/*/ 2>/dev/null; echo; read -r -p "  Enter zum Schliessen ..." x; exit 1; fi; echo "  Installer gefunden: $f"; exec bash "$f" --gui' %k
 Terminal=true
 Categories=System;
