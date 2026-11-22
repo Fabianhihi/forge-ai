@@ -114,10 +114,14 @@ if [ "$ARG" = "--worker" ]; then
     if ! ( [ -f "$DIR/$IMG.xz.sha256" ] && cd "$DIR" && sha256sum -c --quiet "$IMG.xz.sha256" ) 2>/dev/null; then
       st "Packe Vela auf dem USB-Stick aus ..."
       rm -rf "$DIR"; mkdir -p "$DIR"
-      tail -n +"$LINE" "$SELF" | tar -x -C "$DIR" || wdie "Auspacken fehlgeschlagen – ist genug Platz auf dem Stick?"
+      # Der Installer kann in zwei Dateien geteilt sein (vela-installer.run + vela-installer.teil2)
+      PART2=""
+      for c in "$STICK/vela-installer.teil2" "$STICK"/*teil2*; do [ -f "$c" ] && { PART2="$c"; break; }; done
+      { tail -n +"$LINE" "$SELF"; if [ -n "$PART2" ]; then cat "$PART2"; fi; } | tar -x -C "$DIR" \
+        || wdie "Auspacken fehlgeschlagen – liegt auch vela-installer.teil2 auf dem Stick und ist genug Platz frei?"
       sync
       st "Prüfe das Vela-Image ..."
-      ( cd "$DIR" && sha256sum -c --quiet "$IMG.xz.sha256" ) || wdie "Das Image ist beschädigt. Bitte den Installer neu herunterladen."
+      ( cd "$DIR" && sha256sum -c --quiet "$IMG.xz.sha256" ) || wdie "Das Image ist beschädigt oder unvollständig. Bitte vela-installer.run UND vela-installer.teil2 neu auf den Stick kopieren."
     fi
   else
     rm -rf "$DIR/src"; mkdir -p "$DIR/src"
