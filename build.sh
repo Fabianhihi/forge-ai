@@ -183,7 +183,7 @@ say "5/7  Tor Browser einbauen"
 mkdir -p "$ROOT/opt"
 tar -xJf "$WORK/dl/$TB_TAR" -C "$ROOT/opt"
 [ -d "$ROOT/opt/tor-browser" ] || mv "$ROOT"/opt/tor-browser* "$ROOT/opt/tor-browser"
-MISSING="$(in_root "ldd /opt/tor-browser/Browser/firefox* /opt/tor-browser/Browser/libxul.so 2>/dev/null | grep 'not found' | sort -u" || true)"
+MISSING="$(in_root "cd /opt/tor-browser/Browser && LD_LIBRARY_PATH=/opt/tor-browser/Browser ldd ./firefox* ./libxul.so 2>/dev/null | grep 'not found' | sort -u" || true)"
 [ -z "$MISSING" ] || { echo "$MISSING"; die "Dem Tor Browser fehlen Bibliotheken (siehe oben)"; }
 
 # ---------------------------------------------------------------------
