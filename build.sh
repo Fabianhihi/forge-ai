@@ -19,7 +19,7 @@ set -euo pipefail
 
 SUITE="${SUITE:-trixie}"
 MIRROR="${MIRROR:-http://deb.debian.org/debian}"
-IMG_SIZE="${IMG_SIZE:-1900M}"
+IMG_SIZE="${IMG_SIZE:-3200M}"   # Bauplatz; wird am Ende auf die belegte Größe geschrumpft
 OUT="${OUT:-vela-secure-pi3.img}"
 MAX_XZ_MB="${MAX_XZ_MB:-430}"
 VUSER="vela"
@@ -155,6 +155,7 @@ LIBS="$(in_root "apt-cache depends --no-recommends --no-suggests --no-conflicts 
          --no-replaces --no-enhances firefox-esr" \
         | awk '$1 ~ /Depends:/ && $2 !~ /^</ {print $2}' | grep -E '^lib' | sort -u | tr '\n' ' ')"
 in_root "apt-get install -y --no-install-recommends $LIBS libdbus-glib-1-2 libpci3 || true"
+in_root "apt-get clean"
 
 # Raspberry-Pi-Bootkonfiguration
 cat > "$ROOT/etc/default/raspi-firmware" <<'EOF'
@@ -175,7 +176,7 @@ in_root "for k in /boot/vmlinuz-*; do /etc/kernel/postinst.d/z50-raspi-firmware 
 in_root "dpkg --add-architecture armhf && apt-get update -q && cd /tmp && apt-get download busybox-static:arm64 busybox-static:armhf"
 mkdir -p "$WORK/bb"; rm -f "$WORK"/bb/*.deb
 mv "$ROOT"/tmp/busybox-static_*.deb "$WORK/bb/"
-in_root "dpkg --remove-architecture armhf"
+in_root "dpkg --remove-architecture armhf; rm -rf /var/lib/apt/lists/*; apt-get clean"
 
 # ---------------------------------------------------------------------
 say "5/7  Tor Browser einbauen"
