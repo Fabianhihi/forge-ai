@@ -1,0 +1,5 @@
+work/
+*.img
+*.img.xz
+*.img.xz.sha256
+vela-installer.run

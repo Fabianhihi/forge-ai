@@ -1,0 +1,160 @@
+#!/bin/busybox sh
+# =====================================================================
+#  Vela Secure – Installer (läuft komplett im Arbeitsspeicher)
+#  Schreibt vela-secure-pi3.img.xz vom USB-Stick auf die SD-Karte.
+# =====================================================================
+/bin/busybox --install -s /bin
+export PATH=/bin
+mount -t devtmpfs dev /dev 2>/dev/null
+mount -t proc proc /proc
+mount -t sysfs sys /sys
+exec </dev/console >/dev/console 2>&1
+echo 0 > /proc/sys/kernel/printk 2>/dev/null
+
+SD=/dev/mmcblk0
+IMG=vela-secure-pi3.img
+L='  ------------------------------------------------------------'
+
+head_() {
+  clear
+  echo
+  echo "  V E L A   S E C U R E   ·   I N S T A L L E R"
+  echo "$L"
+  echo
+}
+restore_sd() {
+  # Raspberry Pi OS wieder normal starten lassen
+  mkdir -p /sdboot
+  if mount -t vfat "${SD}p1" /sdboot 2>/dev/null; then
+    for f in config.txt cmdline.txt; do
+      [ -f "/sdboot/$f.vela-backup" ] && mv "/sdboot/$f.vela-backup" "/sdboot/$f"
+    done
+    rm -f /sdboot/vela-installer.gz
+    sync; umount /sdboot
+  fi
+}
+fail() {
+  echo
+  echo "  FEHLER: $1"
+  if [ "${WRITING:-0}" = 0 ]; then
+    restore_sd
+    echo
+    echo "  Die SD-Karte wurde NICHT verändert. Raspberry Pi OS startet"
+    echo "  gleich wieder ganz normal."
+  else
+    echo
+    echo "  Die SD-Karte ist nur teilweise beschrieben. Bitte Vela mit dem"
+    echo "  Raspberry Pi Imager am PC auf die SD-Karte flashen."
+  fi
+  echo; echo "  Neustart in 60 Sekunden ..."
+  sleep 60; sync; reboot -f
+}
+
+head_
+echo "  Suche SD-Karte und USB-Stick ..."
+
+# --- SD-Karte ---
+i=0; while [ ! -b "$SD" ] && [ $i -lt 30 ]; do sleep 1; i=$((i+1)); done
+[ -b "$SD" ] || { echo "  FEHLER: SD-Karte nicht gefunden."; sleep 60; reboot -f; }
+
+# --- USB-Stick mit dem Vela-Image ---
+mkdir -p /stick /sdroot
+find_stick() {
+  for d in /dev/sd[a-z][0-9] /dev/sd[a-z]; do
+    [ -b "$d" ] || continue
+    if mount -o ro "$d" /stick 2>/dev/null; then
+      for sub in .vela-installer vela-installer .; do
+        [ -f "/stick/$sub/$IMG.xz" ] && { DIR="/stick/$sub"; return 0; }
+      done
+      umount /stick
+    fi
+  done
+  return 1
+}
+DIR=""
+i=0
+while [ $i -lt 40 ]; do
+  find_stick && break
+  # Nach 12 s: fehlende Treiber (z. B. exFAT) von der SD-Karte nachladen
+  if [ $i = 12 ] && mount -o ro "${SD}p2" /sdroot 2>/dev/null; then
+    mkdir -p /lib/modules
+    mount --bind /sdroot/lib/modules /lib/modules 2>/dev/null
+    for m in usb-storage uas exfat vfat nls_cp437 nls_iso8859_1 nls_utf8; do
+      modprobe "$m" 2>/dev/null
+    done
+    sleep 3
+    umount /lib/modules 2>/dev/null
+    umount /sdroot 2>/dev/null
+  fi
+  sleep 1; i=$((i+1))
+done
+[ -n "$DIR" ] || fail "USB-Stick mit $IMG.xz nicht gefunden (Stick als FAT32 formatieren)."
+mountpoint -q /sdroot && umount /sdroot
+
+SIZE="$(cat "$DIR/$IMG.size" 2>/dev/null)"
+SHA="$(cut -d' ' -f1 "$DIR/$IMG.sha256" 2>/dev/null)"
+[ -n "$SIZE" ] && [ -n "$SHA" ] || fail "Installer-Dateien auf dem Stick sind unvollständig."
+SDBYTES=$(( $(cat /sys/block/mmcblk0/size) * 512 ))
+[ "$SDBYTES" -ge "$SIZE" ] || fail "SD-Karte ist zu klein (mindestens $((SIZE/1000000)) MB nötig)."
+
+# --- Letzte Chance zum Abbrechen ---
+head_
+echo "  Vela Secure wird jetzt auf die SD-Karte installiert."
+echo "  ALLES auf der SD-Karte (Raspberry Pi OS und deine Dateien) wird gelöscht."
+echo
+echo "  SD-Karte:  $SD  ($((SDBYTES/1000000)) MB)"
+echo "  Quelle:    USB-Stick ($IMG.xz)"
+echo
+n=15
+while [ $n -gt 0 ]; do
+  printf '\r  Start in %2d s  –  zum ABBRECHEN eine beliebige Taste drücken ' "$n"
+  if read -r -s -n 1 -t 1 _k 2>/dev/null; then
+    echo; echo; echo "  Abgebrochen."
+    restore_sd
+    echo "  Raspberry Pi OS startet gleich wieder normal."
+    sleep 5; reboot -f
+  fi
+  n=$((n-1))
+done
+
+# --- Schreiben ---
+head_
+echo "  Vela wird installiert. Bitte NICHT ausschalten und den Stick"
+echo "  NICHT abziehen. Das dauert etwa 3–8 Minuten."
+echo
+WRITING=1
+START=$(awk '{print $7}' /sys/block/mmcblk0/stat)
+( xzcat "$DIR/$IMG.xz" | dd of="$SD" bs=4M conv=fsync 2>/tmp/dd.log; echo $? > /tmp/dd.rc ) &
+JOB=$!
+while kill -0 "$JOB" 2>/dev/null; do
+  NOW=$(awk '{print $7}' /sys/block/mmcblk0/stat)
+  W=$(( (NOW - START) * 512 ))
+  P=$(( W * 100 / SIZE )); [ $P -gt 100 ] && P=100
+  B=$(( P / 4 ))
+  BAR="$(printf '%*s' "$B" '' | tr ' ' '#')$(printf '%*s' $((25 - B)) '' | tr ' ' '.')"
+  printf '\r  [%s] %3d %%  (%d / %d MB) ' "$BAR" "$P" $((W/1000000)) $((SIZE/1000000))
+  sleep 2
+done
+wait "$JOB"
+sync
+[ "$(cat /tmp/dd.rc 2>/dev/null)" = 0 ] || fail "Schreiben fehlgeschlagen: $(tail -n 2 /tmp/dd.log)"
+printf '\r  [#########################] 100 %%                              \n'
+
+# --- Prüfen ---
+echo
+echo "  Prüfe die SD-Karte (Prüfsumme) ..."
+echo 3 > /proc/sys/vm/drop_caches 2>/dev/null
+GOT="$(head -c "$SIZE" "$SD" | sha256sum | cut -d' ' -f1)"
+[ "$GOT" = "$SHA" ] || fail "Prüfsumme stimmt nicht – die SD-Karte ist evtl. defekt."
+
+umount /stick 2>/dev/null
+echo
+echo "$L"
+echo "  ✔  Vela Secure wurde erfolgreich installiert!"
+echo
+echo "  Du kannst den USB-Stick jetzt abziehen."
+echo "  Der Pi startet in 15 Sekunden neu in Vela."
+echo "$L"
+sleep 15
+sync
+reboot -f

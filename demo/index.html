@@ -1,0 +1,749 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Vela Secure – Testversion</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#0b0a12;--panel:#15131f;--panel2:#1d1a2a;--panel3:#252136;--line:#2c2840;--txt:#ece9f5;--mut:#9a94b3;
+  --tor:#7d4698;--tor2:#a86fd0;--ok:#3ecf8e;--warn:#f5b041;--bad:#ef5b5b;
+  --mono:'JetBrains Mono',ui-monospace,monospace;--sans:'Inter',system-ui,sans-serif;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;background:#000;color:var(--txt);font-family:var(--sans);overflow:hidden;user-select:none;-webkit-user-select:none}
+input,textarea{user-select:text;-webkit-user-select:text}
+button{font:inherit;color:inherit;cursor:pointer;border:0;background:none}
+.screen{position:fixed;inset:0;display:none}
+.screen.on{display:flex}
+code{font-family:var(--mono);background:#ffffff10;padding:1px 5px;border-radius:4px;font-size:.92em}
+
+/* ---------- Boot ---------- */
+#rainbow{background:linear-gradient(90deg,#f00,#ff0,#0f0,#0ff,#00f,#f0f)}
+#bootlog{background:#000;flex-direction:column;padding:18px 22px;font:13px/1.55 var(--mono);color:#cfcfcf;overflow:hidden}
+#bootlog .ok{color:#3ecf8e}#bootlog .vl{color:var(--tor2)}#bootlog .w{color:var(--warn)}
+#splash{background:radial-gradient(1000px 600px at 50% 40%,#1b1230,#07060c);flex-direction:column;align-items:center;justify-content:center;gap:26px}
+#off{background:#000;align-items:center;justify-content:center;flex-direction:column;gap:14px;color:#666;font-size:14px;cursor:pointer}
+.logo{display:flex;align-items:center;gap:14px}
+.logo h1{font-size:40px;font-weight:700;letter-spacing:.14em}
+.logo small{display:block;font-size:12px;letter-spacing:.32em;color:var(--tor2);font-weight:600;margin-top:2px}
+.bar{width:min(380px,80vw);height:5px;background:#241f36;border-radius:99px;overflow:hidden}
+.bar i{display:block;height:100%;width:0;background:linear-gradient(90deg,var(--tor),var(--tor2));transition:width .3s}
+
+/* ---------- Desktop ---------- */
+#desktop{flex-direction:column}
+#wall{position:absolute;inset:0;z-index:0;transition:background .5s}
+#topbar{position:relative;z-index:5000;height:32px;display:flex;align-items:center;gap:4px;padding:0 6px;background:#0d0a16e8;backdrop-filter:blur(12px);border-bottom:1px solid #ffffff0d;font-size:13px}
+#topbar .tb{height:26px;padding:0 10px;border-radius:6px;display:flex;align-items:center;gap:6px;color:var(--txt)}
+#topbar .tb:hover,#topbar .tb.open{background:#ffffff14}
+#vmenu{font-weight:700;color:#c49ae8}
+#atitle{color:var(--mut);margin-left:6px;font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:30vw}
+#topbar .sp{flex:1}
+#clock{font-weight:500}
+.tordot{width:7px;height:7px;border-radius:50%;background:var(--warn);box-shadow:0 0 8px var(--warn)}
+.tordot.on{background:var(--ok);box-shadow:0 0 8px var(--ok)}
+#area{position:relative;flex:1;z-index:1;overflow:hidden}
+#icons{position:absolute;top:14px;left:14px;display:grid;grid-auto-flow:column;grid-template-rows:repeat(auto-fill,96px);gap:6px;height:calc(100% - 100px)}
+.dicon{width:84px;height:90px;display:flex;flex-direction:column;align-items:center;gap:6px;padding-top:6px;border-radius:10px;font-size:12px;text-align:center;color:#fff;text-shadow:0 1px 3px #000}
+.dicon:hover{background:#ffffff14}.dicon.sel{background:#7d469855}
+.appico{width:46px;height:46px;border-radius:12px;display:grid;place-items:center;font-size:24px;box-shadow:0 4px 14px #0006;flex:none;color:#fff;font-weight:700}
+.appico.s{width:22px;height:22px;border-radius:6px;font-size:12px;box-shadow:none}
+.appico.m{width:34px;height:34px;border-radius:9px;font-size:18px}
+
+/* Dock */
+#dock{position:absolute;left:50%;bottom:10px;transform:translateX(-50%);z-index:4000;display:flex;gap:6px;padding:7px 9px;background:#15111fd9;backdrop-filter:blur(14px);border:1px solid #ffffff12;border-radius:16px}
+.dk{position:relative;display:grid;place-items:center;border-radius:12px;transition:transform .15s}
+.dk:hover{transform:translateY(-4px)}
+.dk::after{content:"";position:absolute;bottom:-5px;width:4px;height:4px;border-radius:50%;background:transparent}
+.dk.run::after{background:var(--tor2)}
+.dk .tip{position:absolute;bottom:58px;background:var(--panel2);border:1px solid var(--line);padding:4px 9px;border-radius:6px;font-size:12px;white-space:nowrap;opacity:0;pointer-events:none;transition:.12s}
+.dk:hover .tip{opacity:1}
+.dsep{width:1px;background:#ffffff1a;margin:6px 3px}
+
+/* Windows */
+.win{position:absolute;display:flex;flex-direction:column;background:var(--panel);border:1px solid #ffffff17;border-radius:11px;box-shadow:0 24px 60px #000b,0 0 0 1px #0006;overflow:hidden;min-width:260px;min-height:160px;animation:pop .16s ease-out}
+@keyframes pop{from{transform:scale(.96);opacity:0}}
+.win.focus{border-color:#a86fd055}
+.win.max{left:0!important;top:0!important;width:100%!important;height:calc(100% - 78px)!important;border-radius:0}
+.win.min{display:none}
+.wt{height:36px;flex:none;display:flex;align-items:center;gap:9px;padding:0 6px 0 11px;background:var(--panel2);border-bottom:1px solid var(--line);cursor:default;touch-action:none}
+.wt .wn{flex:1;font-size:13px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.wt button{width:28px;height:24px;border-radius:6px;color:var(--mut);font-size:13px}
+.wt button:hover{background:#ffffff14;color:var(--txt)}
+.wt button.x:hover{background:var(--bad);color:#fff}
+.wbody{flex:1;position:relative;overflow:hidden;display:flex;flex-direction:column}
+.rz{position:absolute;right:0;bottom:0;width:16px;height:16px;cursor:nwse-resize;touch-action:none;z-index:5}
+
+/* Popups/Menu */
+.pop{position:absolute;background:var(--panel2);border:1px solid var(--line);border-radius:12px;box-shadow:0 18px 50px #000a;padding:12px;display:none;z-index:6000}
+.pop.on{display:block}
+#startmenu{top:38px;left:6px;width:360px;max-width:calc(100vw - 12px)}
+#startmenu input{width:100%;background:#0d0b14;border:1px solid var(--line);border-radius:8px;padding:9px 11px;color:var(--txt);outline:0;font-size:14px}
+#startmenu input:focus{border-color:var(--tor2)}
+.mlist{margin-top:10px;display:grid;grid-template-columns:1fr 1fr;gap:4px}
+.mi{display:flex;align-items:center;gap:10px;padding:8px;border-radius:8px;font-size:13px;text-align:left}
+.mi:hover{background:#ffffff10}
+.mfoot{display:flex;gap:6px;margin-top:10px;padding-top:10px;border-top:1px solid var(--line)}
+.mfoot button{flex:1;padding:8px;border-radius:8px;font-size:12.5px;background:var(--panel3)}
+.mfoot button:hover{background:#7d469855}
+#trayPop{top:38px;right:6px;width:300px}
+.ctx{position:absolute;z-index:7000;background:var(--panel2);border:1px solid var(--line);border-radius:9px;padding:5px;min-width:190px;box-shadow:0 14px 40px #000a}
+.ctx button{display:block;width:100%;text-align:left;padding:7px 10px;border-radius:6px;font-size:13px}
+.ctx button:hover{background:#7d469855}
+.ctx hr{border:0;border-top:1px solid var(--line);margin:4px 0}
+#notes{position:absolute;top:40px;right:10px;z-index:6500;display:flex;flex-direction:column;gap:8px;width:300px;pointer-events:none}
+.note{background:var(--panel2);border:1px solid var(--line);border-left:3px solid var(--tor2);border-radius:9px;padding:10px 12px;font-size:13px;box-shadow:0 10px 30px #0008;animation:slide .25s ease-out}
+.note b{display:block;margin-bottom:2px}.note span{color:var(--mut);font-size:12.5px}
+@keyframes slide{from{transform:translateX(30px);opacity:0}}
+
+/* common UI */
+.btn{background:var(--tor);color:#fff;padding:8px 14px;border-radius:8px;font-weight:600;font-size:13px}
+.btn.g{background:var(--panel3);border:1px solid var(--line);color:var(--txt);font-weight:500}
+.btn:hover{filter:brightness(1.15)}
+.tag{font:600 10.5px var(--mono);padding:3px 7px;border-radius:5px;white-space:nowrap}
+.tag.ok{background:#3ecf8e22;color:var(--ok)}.tag.bad{background:#ef5b5b22;color:var(--bad)}.tag.w{background:#f5b04122;color:var(--warn)}
+.box{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:6px 16px;margin-bottom:12px}
+.row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 0;border-bottom:1px solid var(--line);font-size:13.5px}
+.row:last-child{border:0}
+.row small{display:block;color:var(--mut);font-size:12px;margin-top:2px}
+.tool{display:flex;align-items:center;gap:6px;padding:6px 8px;background:var(--panel2);border-bottom:1px solid var(--line);flex:none}
+.tool .ib,.ib{height:28px;min-width:28px;padding:0 8px;border-radius:6px;display:grid;place-items:center;color:var(--mut);font-size:13px}
+.tool .ib:hover,.ib:hover{background:#ffffff12;color:var(--txt)}
+.fwlog{font:11.5px/1.6 var(--mono);background:#07060b;border:1px solid var(--line);border-radius:9px;padding:10px;height:170px;overflow:auto;color:#bbb}
+.fwlog .d{color:var(--bad)}
+
+/* Browser app */
+.b-tabs{display:flex;align-items:flex-end;gap:3px;padding:5px 6px 0;background:#0f0d17;height:36px;flex:none}
+.b-tab{display:flex;align-items:center;gap:6px;padding:0 8px 0 11px;height:31px;min-width:90px;max-width:200px;flex:0 1 180px;border-radius:7px 7px 0 0;color:var(--mut);font-size:12.5px;cursor:pointer}
+.b-tab.act{background:var(--panel);color:var(--txt)}
+.b-tab span{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.b-tab b{font-weight:400;opacity:.6;padding:1px 4px;border-radius:4px}.b-tab b:hover{background:#ffffff1a;opacity:1}
+.b-nav{display:flex;align-items:center;gap:4px;padding:6px 8px;background:var(--panel);border-bottom:1px solid var(--line);flex:none}
+.b-url{flex:1;display:flex;align-items:center;gap:8px;background:#0d0b14;border:1px solid var(--line);border-radius:8px;height:32px;padding:0 6px 0 4px;min-width:0}
+.b-url:focus-within{border-color:var(--tor2)}
+.b-url input{flex:1;min-width:0;background:none;border:0;outline:0;color:var(--txt);font:13.5px var(--sans)}
+.circ{display:flex;align-items:center;gap:5px;height:24px;padding:0 8px;border-radius:6px;font-size:12px;color:var(--tor2);background:#7d46982a;white-space:nowrap}
+.circ:hover{background:#7d469855}
+.b-content{flex:1;overflow:auto;background:#100e18;position:relative}
+.page{max-width:780px;margin:0 auto;padding:44px 22px 50px}
+.home{text-align:center;padding-top:6vh}
+.home h2{font-size:26px;font-weight:600;margin:14px 0 6px}.home p{color:var(--mut);font-size:14px}
+.search{margin:24px auto 0;max-width:520px;display:flex;background:var(--panel);border:1px solid var(--line);border-radius:11px;overflow:hidden}
+.search input{flex:1;padding:12px 14px;background:none;border:0;outline:0;color:var(--txt);font-size:14px;min-width:0}
+.search button{padding:0 16px;background:var(--tor);color:#fff;font-weight:600}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;margin-top:30px;text-align:left}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:11px;padding:14px;cursor:pointer;transition:.15s}
+.card:hover{border-color:var(--tor2);transform:translateY(-2px)}
+.card h4{font-size:13.5px;margin-bottom:4px}.card p{font-size:12px;color:var(--mut);line-height:1.45}.card .ic{font-size:19px;margin-bottom:6px}
+h2.t{font-size:23px;margin-bottom:6px}.sub{color:var(--mut);margin-bottom:22px;font-size:14px}
+.fake{border:1px dashed var(--line);border-radius:11px;padding:16px;color:var(--mut);font-size:13.5px;line-height:1.6}
+.bpop{position:absolute;top:76px;width:300px;background:var(--panel2);border:1px solid var(--line);border-radius:11px;box-shadow:0 18px 50px #000a;padding:14px;display:none;z-index:20}
+.bpop.on{display:block}.bpop h5{font-size:13px;margin-bottom:10px}
+.hop{display:flex;align-items:center;gap:10px;position:relative;padding:6px 0 6px 4px;font-size:12.5px}
+.hop i{width:11px;height:11px;border-radius:50%;border:2px solid var(--tor2);background:var(--panel2);z-index:1;flex:none}
+.hop:not(:last-child)::after{content:"";position:absolute;left:9px;top:20px;height:22px;border-left:2px solid #7d469877}
+.hop small{color:var(--mut);font:10.5px var(--mono);margin-left:auto}
+.lvl button{display:block;width:100%;text-align:left;border:1px solid var(--line);background:var(--panel3);border-radius:9px;padding:10px 12px;margin-bottom:6px}
+.lvl button.on{border-color:var(--tor2);background:#7d46982e}
+.lvl b{display:block;font-size:13px;margin-bottom:2px}.lvl span{font-size:11.5px;color:var(--mut)}
+
+/* Files */
+.f-wrap{flex:1;display:flex;min-height:0}
+.f-side{width:170px;flex:none;background:#12101b;border-right:1px solid var(--line);padding:8px;overflow:auto}
+.f-side button{display:flex;gap:8px;width:100%;padding:7px 9px;border-radius:7px;font-size:13px;text-align:left}
+.f-side button:hover{background:#ffffff0d}.f-side button.on{background:#7d469844}
+.f-main{flex:1;overflow:auto;padding:12px;display:grid;grid-template-columns:repeat(auto-fill,minmax(92px,1fr));align-content:start;gap:6px}
+.f-it{display:flex;flex-direction:column;align-items:center;gap:5px;padding:9px 4px;border-radius:9px;font-size:12px;text-align:center;word-break:break-word;cursor:default}
+.f-it:hover{background:#ffffff0d}.f-it.sel{background:#7d469855}
+.f-it .fi{font-size:34px;line-height:1}
+.f-path{flex:1;font:12.5px var(--mono);color:var(--mut);background:#0d0b14;border:1px solid var(--line);border-radius:7px;padding:5px 9px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.f-empty{grid-column:1/-1;color:var(--mut);font-size:13px;text-align:center;padding:40px}
+.f-in{background:#0d0b14;border:1px solid var(--tor2);border-radius:6px;color:var(--txt);padding:4px 8px;font-size:13px;outline:0;width:160px}
+
+/* Terminal */
+.term{flex:1;background:#0c0a12;font:13px/1.5 var(--mono);color:#ddd;padding:10px 12px;overflow:auto;user-select:text;-webkit-user-select:text}
+.term .p{color:var(--tor2)}.term .g{color:var(--ok)}.term .r{color:var(--bad)}.term .y{color:var(--warn)}.term .m{color:var(--mut)}
+.term .line{display:flex;gap:8px}.term input{flex:1;background:none;border:0;outline:0;color:#fff;font:inherit;caret-color:var(--tor2)}
+.term pre{font:inherit;white-space:pre-wrap}
+
+/* Editor */
+.ed{flex:1;background:#0f0d16;border:0;outline:0;color:var(--txt);font:13.5px/1.6 var(--mono);padding:14px;resize:none}
+/* Calc */
+.calc{flex:1;display:flex;flex-direction:column;padding:12px;gap:10px;background:#100e18}
+.cdisp{background:#0b0a10;border:1px solid var(--line);border-radius:10px;padding:12px;text-align:right}
+.cdisp small{display:block;color:var(--mut);font:12px var(--mono);min-height:16px}
+.cdisp div{font:600 28px var(--mono);overflow:hidden;text-overflow:ellipsis}
+.ckeys{flex:1;display:grid;grid-template-columns:repeat(4,1fr);gap:7px}
+.ckeys button{background:var(--panel3);border-radius:9px;font-size:17px;font-weight:500}
+.ckeys button:hover{filter:brightness(1.25)}.ckeys .op{background:#7d469866}.ckeys .eq{background:var(--tor);color:#fff}
+/* Settings */
+.s-wrap{flex:1;display:flex;min-height:0}
+.s-side{width:190px;flex:none;background:#12101b;border-right:1px solid var(--line);padding:8px;overflow:auto}
+.s-side button{display:flex;gap:9px;width:100%;padding:8px 10px;border-radius:7px;font-size:13px;text-align:left}
+.s-side button:hover{background:#ffffff0d}.s-side button.on{background:#7d469844}
+.s-main{flex:1;overflow:auto;padding:20px 22px}
+.s-main h3{font-size:19px;margin-bottom:4px}.s-main .sub{margin-bottom:16px}
+.walls{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:10px}
+.walls button{height:80px;border-radius:10px;border:2px solid transparent}.walls button.on{border-color:var(--tor2)}
+select{background:#0d0b14;border:1px solid var(--line);color:var(--txt);border-radius:7px;padding:6px 8px;font:13px var(--sans)}
+/* Monitor */
+.mon{flex:1;overflow:auto;padding:16px;background:#100e18}
+.cpus{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:14px}
+.cpu{background:var(--panel2);border:1px solid var(--line);border-radius:9px;padding:10px;font-size:12px;color:var(--mut)}
+.cpu .mb{height:6px;background:#241f36;border-radius:9px;margin-top:8px;overflow:hidden}.cpu .mb i{display:block;height:100%;background:linear-gradient(90deg,var(--tor),var(--tor2));transition:width .6s}
+.cpu b{display:block;color:var(--txt);font-size:18px;font-family:var(--mono);margin-top:4px}
+table{width:100%;border-collapse:collapse;font-size:12.5px}
+th{text-align:left;color:var(--mut);font-weight:500;padding:6px 8px;border-bottom:1px solid var(--line)}
+td{padding:6px 8px;border-bottom:1px solid #ffffff08;font-family:var(--mono)}
+.imgv{flex:1;display:grid;place-items:center;background:#08070c}
+
+.demo-note{position:fixed;left:12px;bottom:14px;font-size:11px;color:#9a94b377;z-index:4500;pointer-events:none}
+@media (max-width:700px){.f-side,.s-side{width:120px}.cpus{grid-template-columns:1fr 1fr}#atitle{display:none}.demo-note{display:none}.circ .lbl{display:none}}
+</style>
+</head>
+<body>
+
+<div id="rainbow" class="screen on"></div>
+<div id="bootlog" class="screen"></div>
+<div id="splash" class="screen">
+  <div class="logo"><svg width="64" height="64" viewBox="0 0 64 64"><circle cx="32" cy="34" r="26" fill="none" stroke="#a86fd0" stroke-width="4"/><circle cx="32" cy="34" r="17" fill="none" stroke="#8a52b4" stroke-width="4"/><circle cx="32" cy="34" r="8" fill="#7d4698"/><path d="M32 8c3-4 7-5 10-4" stroke="#a86fd0" stroke-width="3" fill="none" stroke-linecap="round"/></svg>
+  <div><h1>VELA</h1><small>SECURE · TOR EDITION</small></div></div>
+  <div class="bar"><i id="spbar"></i></div>
+</div>
+<div id="off" class="screen"><div>Vela wurde heruntergefahren.</div><div style="font-size:12px">Zum Einschalten klicken</div></div>
+
+<div id="desktop" class="screen">
+  <div id="wall"></div>
+  <div id="topbar">
+    <button class="tb" id="vmenu">◉ Vela</button>
+    <span id="atitle"></span>
+    <div class="sp"></div>
+    <span id="clock"></span>
+    <div class="sp"></div>
+    <button class="tb" id="trayBtn"><span class="tordot" id="tordot"></span><span id="torLbl">Tor verbindet …</span><span>📶</span><span>🔊</span></button>
+  </div>
+  <div id="area">
+    <div id="icons"></div>
+    <div id="wins"></div>
+    <div id="dock"></div>
+    <div id="notes"></div>
+  </div>
+  <div class="pop" id="startmenu">
+    <input id="msearch" placeholder="Programme suchen …">
+    <div class="mlist" id="mlist"></div>
+    <div class="mfoot"><button id="mLock">🔄 Neu starten</button><button id="mOff">⏻ Ausschalten</button></div>
+  </div>
+  <div class="pop" id="trayPop"></div>
+</div>
+<div class="demo-note">Testversion im Browser – simuliert, keine echte Tor-Verbindung · Esc überspringt den Start</div>
+
+<script>
+const $=(s,r=document)=>r.querySelector(s), $$=(s,r=document)=>[...r.querySelectorAll(s)];
+const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const pick=a=>a[Math.floor(Math.random()*a.length)];
+const show=id=>$$('.screen').forEach(s=>s.classList.toggle('on',s.id===id));
+let skip=false;document.addEventListener('keydown',e=>{if(e.key==='Escape')skip=true});
+const store={get(k,d){try{const v=localStorage.getItem('vela.'+k);return v?JSON.parse(v):d}catch(e){return d}},set(k,v){try{localStorage.setItem('vela.'+k,JSON.stringify(v))}catch(e){}}};
+
+/* ================= System-Zustand ================= */
+const WALLS=[
+ 'radial-gradient(1200px 700px at 70% 20%,#3b1d5e 0%,transparent 60%),radial-gradient(900px 600px at 10% 90%,#1d2a5e 0%,transparent 60%),#0c0914',
+ 'radial-gradient(1000px 700px at 30% 30%,#0f4a4a 0%,transparent 60%),radial-gradient(900px 600px at 90% 90%,#2a1450 0%,transparent 60%),#070b10',
+ 'linear-gradient(160deg,#2b0f33 0%,#120a1f 45%,#06040a 100%)',
+ 'radial-gradient(900px 600px at 50% 110%,#7d4698 0%,transparent 60%),linear-gradient(#0a0812,#130d22)',
+];
+const SYS={tor:false,fwBlocked:0,fwLog:[],level:0,wall:store.get('wall',0),bridge:'Keine',
+  wifi:'FRITZ!Box 7590 XY',mac:'',boot:Date.now()};
+const randMac=()=>'b6:'+Array.from({length:5},()=>Math.floor(Math.random()*256).toString(16).padStart(2,'0')).join(':');
+SYS.mac=randMac();
+const COUNTRIES=[['🇩🇪','Deutschland'],['🇳🇱','Niederlande'],['🇫🇷','Frankreich'],['🇸🇪','Schweden'],['🇨🇭','Schweiz'],['🇫🇮','Finnland'],['🇦🇹','Österreich'],['🇷🇴','Rumänien'],['🇮🇸','Island'],['🇳🇴','Norwegen'],['🇱🇺','Luxemburg']];
+const rip=()=>[1,2,3,4].map(()=>Math.floor(Math.random()*223)+1).join('.');
+function newCircuit(){const c=[...COUNTRIES].sort(()=>Math.random()-.5);return c.slice(0,3).map(x=>({f:x[0],n:x[1],ip:rip()}))}
+
+/* ================= Dateisystem ================= */
+const DEFAULT_FS={t:'d',c:{
+ 'Schreibtisch':{t:'d',c:{'Willkommen.txt':{t:'f',v:'Willkommen bei Vela Secure!\n\nAlle Internetverbindungen laufen über Tor.\nDie Firewall (Killswitch) blockiert alles andere.\n\nTastenkürzel auf dem echten Pi:\n  Super + Leertaste   Programme starten\n  Super + B           Tor Browser\n  Super + Enter       Terminal\n  Super + E           Dateien\n  Super + Q           Fenster schließen\n  Druck               Bildschirmfoto\n'}}},
+ 'Dokumente':{t:'d',c:{'Notizen.txt':{t:'f',v:'Meine Notizen\n- Vela auf den Pi flashen\n- WLAN in vela-wlan.txt eintragen\n'},'Projekte':{t:'d',c:{}}}},
+ 'Downloads':{t:'d',c:{}},
+ 'Bilder':{t:'d',c:{'Hintergrund-1.png':{t:'f',v:'#img0'},'Hintergrund-2.png':{t:'f',v:'#img1'}}},
+ '.config':{t:'d',c:{'vela.conf':{t:'f',v:'[vela]\nbrowser=tor-browser\nfirewall=killswitch\nlogs=volatile\n'}}}
+}};
+let FS=store.get('fs',null)||JSON.parse(JSON.stringify(DEFAULT_FS));
+const saveFS=()=>store.set('fs',FS);
+const HOME='/home/vela';
+function norm(p,cwd=HOME){if(p.startsWith('~'))p=HOME+p.slice(1);if(!p.startsWith('/'))p=cwd+'/'+p;
+  const out=[];for(const s of p.split('/')){if(!s||s==='.')continue;if(s==='..')out.pop();else out.push(s)}return '/'+out.join('/')}
+function node(p){p=norm(p);if(p===HOME)return FS;if(!p.startsWith(HOME+'/'))return SYSFILES[p]||null;
+  let n=FS;for(const s of p.slice(HOME.length+1).split('/')){if(!n||n.t!=='d')return null;n=n.c[s]}return n||null}
+function parentOf(p){p=norm(p);const i=p.lastIndexOf('/');return [p.slice(0,i)||'/',p.slice(i+1)]}
+function writeFile(p,v){const [d,n]=parentOf(p);const dir=node(d);if(!dir||dir.t!=='d'||!d.startsWith(HOME))return false;dir.c[n]={t:'f',v};saveFS();emit('fs');return true}
+function mkdir(p){const [d,n]=parentOf(p);const dir=node(d);if(!dir||dir.t!=='d'||!d.startsWith(HOME)||dir.c[n])return false;dir.c[n]={t:'d',c:{}};saveFS();emit('fs');return true}
+function rm(p){const [d,n]=parentOf(p);const dir=node(d);if(!dir||!dir.c||!dir.c[n]||!d.startsWith(HOME))return false;delete dir.c[n];saveFS();emit('fs');return true}
+const SYSFILES={'/':{t:'d',c:{bin:{t:'d',c:{}},boot:{t:'d',c:{}},etc:{t:'d',c:{}},home:{t:'d',c:{vela:{}}},opt:{t:'d',c:{}},proc:{t:'d',c:{}},usr:{t:'d',c:{}},var:{t:'d',c:{}}}},
+ '/home':{t:'d',c:{vela:{t:'d'}}},
+ '/etc':{t:'d',c:{'tor':{t:'d'},'nftables.conf':{t:'f'},'hostname':{t:'f'},'vela-release':{t:'f'}}},
+ '/etc/hostname':{t:'f',v:'vela\n'},
+ '/etc/vela-release':{t:'f',v:'Vela Secure 1.0 (Debian 13 trixie arm64) · Tor Browser 16.0\n'},
+ '/etc/tor':{t:'d',c:{torrc:{t:'f'}}},
+ '/etc/tor/torrc':{t:'f',v:'# Vela Secure – System-Tor\nSocksPort 9050 IsolateSOCKSAuth IsolateDestAddr\nControlPort 9051\nCookieAuthentication 1\nAvoidDiskWrites 1\nClientUseIPv6 1\n'},
+ '/etc/nftables.conf':{t:'f',v:'table inet vela {\n  chain input  { type filter hook input priority 0; policy drop;\n    iif lo accept\n    ct state established,related accept }\n  chain output { type filter hook output priority 0; policy drop;\n    oif lo accept\n    ct state established,related accept\n    meta skuid "debian-tor" accept\n    meta skuid "systemd-timesync" udp dport 123 accept\n    counter drop }\n}\n'},
+ '/opt':{t:'d',c:{'tor-browser':{t:'d'}}},
+};
+
+/* ================= Events ================= */
+const bus={};const on=(e,f)=>{(bus[e]=bus[e]||[]).push(f);return ()=>{bus[e]=bus[e].filter(x=>x!==f)}};const emit=(e,d)=>(bus[e]||[]).forEach(f=>{try{f(d)}catch(x){console.error(x)}});
+function notify(t,s){const n=document.createElement('div');n.className='note';n.innerHTML=`<b>${t}</b><span>${s||''}</span>`;$('#notes').appendChild(n);setTimeout(()=>{n.style.transition='.3s';n.style.opacity=0;setTimeout(()=>n.remove(),300)},4200)}
+const BG=[['root','udp','1.1.1.1:53','DNS ohne Tor'],['vela','tcp','142.250.185.78:443','direkte Verbindung'],['root','udp','224.0.0.251:5353','mDNS'],['root','udp','239.255.255.250:1900','SSDP/UPnP'],['vela','udp','8.8.8.8:53','DNS ohne Tor'],['root','tcp','151.101.2.132:80','direkte Verbindung']];
+function fwEvent(e){e=e||pick(BG);SYS.fwBlocked++;const t=new Date().toLocaleTimeString('de-DE');
+  SYS.fwLog.unshift(`<span class="d">DROP</span> ${t}  uid=${e[0]} ${e[1]} → ${e[2]}  (${e[3]})`);SYS.fwLog=SYS.fwLog.slice(0,80);emit('fw')}
+
+/* ================= Boot ================= */
+const LOG=[
+ ['[    0.000000] Booting Linux on physical CPU 0x0000000000 [0x410fd034]',''],
+ ['[    0.000000] Linux version 6.12.48+deb13-arm64 (Debian) aarch64',''],
+ ['[    0.000000] Machine model: Raspberry Pi 3 Model B Rev 1.2',''],
+ ['[    0.000000] Kernel command line: root=LABEL=RASPIROOT quiet apparmor=1 init_on_alloc=1 init_on_free=1',''],
+ ['[    0.391202] AppArmor: AppArmor initialized','ok'],
+ ['[    2.904115] EXT4-fs (mmcblk0p2): mounted filesystem (LABEL=RASPIROOT)',''],
+ ['[  OK  ] Started systemd-journald.service – Journal (nur im RAM).','ok'],
+ ['[  OK  ] Loaded sysctl hardening: kptr_restrict=2, bpf_disabled=1, ptrace_scope=2','ok'],
+ ['[  OK  ] Blocked modules: bluetooth btbcm hci_uart dccp sctp rds tipc','ok'],
+ ['[  OK  ] Started zramswap.service – zram swap (zstd).','ok'],
+ ['[  OK  ] Finished nftables.service – vela firewall (policy drop).','ok'],
+ ['[  OK  ] Started systemd-networkd.service – Network Configuration.','ok'],
+ ['[  OK  ] wlan0: zufällige MAC-Adresse gesetzt','ok'],
+ ['[ MASK ] ssh.service, bluetooth.service – deaktiviert.','w'],
+ ['[  OK  ] Started tor@default.service – Anonymizing overlay network.','ok'],
+ ['[  OK  ] Started getty@tty1.service – Autologin vela.','ok'],
+ ['[  OK  ] Reached target graphical session (labwc).','ok'],
+];
+async function boot(){
+  skip=false;$('#bootlog').innerHTML='';$('#spbar').style.width='0';SYS.tor=false;SYS.boot=Date.now();
+  show('rainbow');await sleep(skip?0:900);show('bootlog');
+  for(const [t,c] of LOG){const d=document.createElement('div');d.textContent=t;if(c)d.className=c;$('#bootlog').appendChild(d);await sleep(skip?0:90+Math.random()*110)}
+  await sleep(skip?0:350);show('splash');
+  for(const p of [20,45,70,90,100]){$('#spbar').style.width=p+'%';await sleep(skip?40:280)}
+  show('desktop');startDesktop();
+}
+$('#off').onclick=()=>boot();
+
+/* ================= Window-Manager ================= */
+const APPS={
+ browser:{name:'Tor Browser',ico:'🧅',col:'linear-gradient(135deg,#a86fd0,#5b2a80)',w:960,h:620,single:true,init:initBrowser},
+ files:{name:'Dateien',ico:'📁',col:'linear-gradient(135deg,#4b8df0,#2758b8)',w:780,h:480,init:initFiles},
+ term:{name:'Terminal',ico:'›_',col:'linear-gradient(135deg,#3a364d,#16141f)',w:720,h:440,init:initTerm},
+ editor:{name:'Texteditor',ico:'📝',col:'linear-gradient(135deg,#f0b54b,#c27d1c)',w:680,h:480,init:initEditor},
+ calc:{name:'Rechner',ico:'🧮',col:'linear-gradient(135deg,#3ecf8e,#1d8a5a)',w:300,h:440,single:true,init:initCalc},
+ monitor:{name:'Systemmonitor',ico:'📊',col:'linear-gradient(135deg,#ef7b5b,#b2402a)',w:700,h:500,single:true,init:initMonitor},
+ settings:{name:'Einstellungen',ico:'⚙️',col:'linear-gradient(135deg,#77738f,#3a374d)',w:840,h:560,single:true,init:initSettings},
+ viewer:{name:'Bildbetrachter',ico:'🖼️',col:'linear-gradient(135deg,#d06fb4,#82307a)',w:560,h:420,init:initViewer,hidden:true},
+};
+const DOCK=['browser','files','term','editor','calc','monitor','settings'];
+const WM={z:100,wins:[],n:0,focus:null};
+const ico=(id,cls='')=>`<span class="appico ${cls}" style="background:${APPS[id].col}">${APPS[id].ico}</span>`;
+function openApp(id,arg){
+  const A=APPS[id];
+  if(A.single){const ex=WM.wins.find(w=>w.app===id);if(ex){restore(ex);ex.onArg&&arg&&ex.onArg(arg);return ex}}
+  const area=$('#area'),W=area.clientWidth,H=area.clientHeight;
+  const small=W<720;const w=Math.min(A.w,W-20),h=Math.min(A.h,H-90);
+  const off=(WM.n++%6)*26;
+  const el=document.createElement('div');el.className='win';
+  el.style.cssText=`width:${w}px;height:${h}px;left:${Math.max(6,(W-w)/2-80+off)}px;top:${Math.max(6,(H-h)/2-50+off)}px`;
+  el.innerHTML=`<div class="wt">${ico(id,'s')}<span class="wn">${A.name}</span><button data-a="min" title="Minimieren">–</button><button data-a="max" title="Maximieren">□</button><button data-a="close" class="x" title="Schließen">✕</button></div><div class="wbody"></div><div class="rz"></div>`;
+  $('#wins').appendChild(el);
+  const win={id:++WM.n,app:id,el,body:$('.wbody',el),title:A.name,cleanup:[]};
+  win.setTitle=t=>{win.title=t;$('.wn',el).textContent=t;if(WM.focus===win)$('#atitle').textContent=t};
+  win.close=()=>{win.cleanup.forEach(f=>f());el.remove();WM.wins=WM.wins.filter(x=>x!==win);if(WM.focus===win){WM.focus=null;const top=WM.wins.filter(w=>!w.el.classList.contains('min')).sort((a,b)=>b.el.style.zIndex-a.el.style.zIndex)[0];top?focus(top):$('#atitle').textContent=''}renderDock()};
+  WM.wins.push(win);
+  if(small)el.classList.add('max');
+  el.addEventListener('pointerdown',()=>focus(win),true);
+  $('.wt',el).addEventListener('dblclick',e=>{if(!e.target.closest('button'))el.classList.toggle('max')});
+  $$('.wt button',el).forEach(b=>b.onclick=e=>{e.stopPropagation();const a=b.dataset.a;
+    if(a==='close')win.close();else if(a==='max')el.classList.toggle('max');else{el.classList.add('min');if(WM.focus===win){WM.focus=null;$('#atitle').textContent=''}renderDock()}});
+  drag($('.wt',el),el,(dx,dy,s)=>{if(el.classList.contains('max')){el.classList.remove('max');s.l=Math.max(0,s.x-el.offsetWidth/2);s.t=0}
+    el.style.left=Math.min(W-60,Math.max(-el.offsetWidth+80,s.l+dx))+'px';el.style.top=Math.max(0,Math.min(H-40,s.t+dy))+'px'});
+  drag($('.rz',el),el,(dx,dy,s)=>{el.style.width=Math.max(260,s.w+dx)+'px';el.style.height=Math.max(160,s.h+dy)+'px'});
+  A.init(win,arg);focus(win);renderDock();return win;
+}
+function drag(handle,el,move){handle.addEventListener('pointerdown',e=>{if(e.target.closest('button'))return;e.preventDefault();
+  const s={x:e.clientX,y:e.clientY,l:el.offsetLeft,t:el.offsetTop,w:el.offsetWidth,h:el.offsetHeight};handle.setPointerCapture(e.pointerId);
+  const mv=ev=>move(ev.clientX-s.x,ev.clientY-s.y,s);const up=()=>{handle.removeEventListener('pointermove',mv);handle.removeEventListener('pointerup',up)};
+  handle.addEventListener('pointermove',mv);handle.addEventListener('pointerup',up)})}
+function focus(w){if(WM.focus===w&&+w.el.style.zIndex===WM.z)return;WM.wins.forEach(x=>x.el.classList.remove('focus'));w.el.style.zIndex=++WM.z;w.el.classList.add('focus');WM.focus=w;$('#atitle').textContent=w.title;renderDock()}
+function restore(w){w.el.classList.remove('min');focus(w)}
+function renderDock(){
+  const d=$('#dock');d.innerHTML='';
+  const extra=WM.wins.map(w=>w.app).filter((a,i,arr)=>!DOCK.includes(a)&&arr.indexOf(a)===i);
+  [...DOCK,...(extra.length?['|',...extra]:[])].forEach(id=>{
+    if(id==='|'){const s=document.createElement('div');s.className='dsep';d.appendChild(s);return}
+    const run=WM.wins.filter(w=>w.app===id);const b=document.createElement('button');b.className='dk'+(run.length?' run':'');
+    b.innerHTML=ico(id)+`<span class="tip">${APPS[id].name}</span>`;
+    b.onclick=()=>{if(!run.length)return openApp(id);const w=run[run.length-1];
+      if(w.el.classList.contains('min'))restore(w);else if(WM.focus===w&&run.length===1){w.el.classList.add('min');WM.focus=null;$('#atitle').textContent='';renderDock()}else focus(w)};
+    d.appendChild(b)});
+}
+
+/* ================= Desktop ================= */
+let started=false;
+function startDesktop(){
+  $('#wall').style.background=WALLS[SYS.wall]||WALLS[0];
+  [...WM.wins].forEach(w=>w.close());$$('.win').forEach(w=>w.remove());WM.wins=[];WM.focus=null;
+  renderIcons();renderDock();updTor();tick();
+  if(!started){started=true;setInterval(tick,1000);setInterval(()=>{if(Math.random()<.3)fwEvent()},5000)}
+  setTimeout(()=>{SYS.tor=true;updTor();emit('tor');notify('🧅 Mit Tor verbunden','Alle Verbindungen laufen jetzt anonym über das Tor-Netzwerk.')},skip?600:2600);
+  setTimeout(()=>openApp('browser'),skip?200:900);
+}
+function updTor(){$('#tordot').classList.toggle('on',SYS.tor);$('#torLbl').textContent=SYS.tor?'Tor':'Tor verbindet …'}
+function tick(){const d=new Date();$('#clock').textContent=d.toLocaleDateString('de-DE',{weekday:'short',day:'numeric',month:'short'})+'  '+d.toLocaleTimeString('de-DE',{hour:'2-digit',minute:'2-digit'})}
+function renderIcons(){
+  const ic=$('#icons');ic.innerHTML='';
+  const items=[['browser','Tor Browser'],['files','Persönlicher Ordner'],['term','Terminal'],['settings','Einstellungen']];
+  items.forEach(([id,n])=>ic.appendChild(dIcon(ico(id),n,()=>openApp(id))));
+  const desk=node(HOME+'/Schreibtisch');
+  Object.keys(desk.c).forEach(n=>ic.appendChild(dIcon(`<span style="font-size:38px">${fIcon(n,desk.c[n])}</span>`,n,()=>openPath(HOME+'/Schreibtisch/'+n))));
+}
+function dIcon(html,name,fn){const b=document.createElement('button');b.className='dicon';b.innerHTML=html+`<span>${esc(name)}</span>`;
+  b.onclick=()=>{$$('.dicon').forEach(x=>x.classList.remove('sel'));b.classList.add('sel')};b.ondblclick=fn;
+  let t=0;b.addEventListener('touchend',()=>{if(Date.now()-t<350)fn();t=Date.now()});return b}
+on('fs',renderIcons);
+const fIcon=(n,nd)=>nd.t==='d'?'📁':/\.(png|jpg)$/.test(n)?'🖼️':/\.(sh)$/.test(n)?'⚙️':'📄';
+function openPath(p){const n=node(p);if(!n)return;if(n.t==='d')openApp('files',p);else if(/\.(png|jpg)$/.test(p))openApp('viewer',p);else openApp('editor',p)}
+
+/* Startmenü & Tray */
+function renderMenu(q=''){const l=$('#mlist');l.innerHTML='';
+  Object.keys(APPS).filter(k=>!APPS[k].hidden&&APPS[k].name.toLowerCase().includes(q.toLowerCase())).forEach(k=>{
+    const b=document.createElement('button');b.className='mi';b.innerHTML=ico(k,'m')+APPS[k].name;b.onclick=()=>{closePops();openApp(k)};l.appendChild(b)})}
+function closePops(){$$('.pop').forEach(p=>p.classList.remove('on'));$$('#topbar .tb').forEach(t=>t.classList.remove('open'));$$('.ctx').forEach(c=>c.remove())}
+$('#vmenu').onclick=e=>{e.stopPropagation();const o=$('#startmenu').classList.contains('on');closePops();if(!o){$('#startmenu').classList.add('on');$('#vmenu').classList.add('open');renderMenu();$('#msearch').value='';setTimeout(()=>$('#msearch').focus(),30)}};
+$('#msearch').oninput=e=>renderMenu(e.target.value);
+$('#msearch').onkeydown=e=>{if(e.key==='Enter'){const f=$('#mlist .mi');f&&f.click()}};
+$('#trayBtn').onclick=e=>{e.stopPropagation();const o=$('#trayPop').classList.contains('on');closePops();if(!o){renderTray();$('#trayPop').classList.add('on');$('#trayBtn').classList.add('open')}};
+function renderTray(){$('#trayPop').innerHTML=`
+  <div class="row"><div>🧅 Tor<small>${SYS.tor?'Verbunden · Brücke: '+SYS.bridge:'Verbindet …'}</small></div><span class="tag ${SYS.tor?'ok':'w'}">${SYS.tor?'AN':'…'}</span></div>
+  <div class="row"><div>🧱 Killswitch<small>${SYS.fwBlocked} Verbindungen blockiert</small></div><span class="tag ok">AKTIV</span></div>
+  <div class="row"><div>📶 WLAN<small>${SYS.wifi||'nicht verbunden'}</small></div><span class="tag ${SYS.wifi?'ok':'w'}">${SYS.wifi?'AN':'AUS'}</span></div>
+  <div class="row"><div>🔊 Lautstärke<small><input type="range" value="60" style="width:150px;accent-color:#a86fd0"></small></div></div>
+  <div style="display:flex;gap:6px;margin-top:8px"><button class="btn g" style="flex:1" onclick="closePops();openApp('settings','security')">Sicherheit</button><button class="btn g" style="flex:1" onclick="closePops();openApp('settings','network')">Netzwerk</button></div>`}
+document.addEventListener('pointerdown',e=>{if(!e.target.closest('.pop,.ctx,#topbar'))closePops()});
+$('#area').addEventListener('contextmenu',e=>{if(e.target.closest('.win,#dock'))return;e.preventDefault();ctxMenu(e.clientX,e.clientY,[
+  ['🧅 Tor Browser',()=>openApp('browser')],['📁 Dateien',()=>openApp('files')],['›_ Terminal',()=>openApp('term')],null,
+  ['📄 Neue Textdatei',()=>{let i=1;while(node(HOME+'/Schreibtisch/Neue Datei '+i+'.txt'))i++;writeFile(HOME+'/Schreibtisch/Neue Datei '+i+'.txt','')}],
+  ['🖼️ Hintergrund ändern',()=>openApp('settings','look')],null,['⏻ Ausschalten',powerOff]])});
+function ctxMenu(x,y,items){closePops();const m=document.createElement('div');m.className='ctx';
+  items.forEach(it=>{if(!it){m.appendChild(document.createElement('hr'));return}const b=document.createElement('button');b.textContent=it[0];b.onclick=()=>{m.remove();it[1]()};m.appendChild(b)});
+  document.body.appendChild(m);m.style.left=Math.min(x,innerWidth-200)+'px';m.style.top=Math.min(y,innerHeight-m.offsetHeight-6)+'px'}
+async function powerOff(){closePops();show('splash');$('#spbar').style.width='100%';await sleep(300);for(const p of [70,40,10,0]){$('#spbar').style.width=p+'%';await sleep(220)}show('off')}
+$('#mOff').onclick=powerOff;$('#mLock').onclick=()=>{closePops();boot()};
+
+/* ================= App: Tor Browser ================= */
+const LV=['Standard','Sicherer','Am sichersten'];
+function initBrowser(win,arg){
+  const B={tabs:[],act:0};const b=win.body;
+  b.innerHTML=`<div class="b-tabs"></div><div class="b-nav">
+   <button class="ib" data-n="back" title="Zurück">←</button><button class="ib" data-n="fwd" title="Vor">→</button><button class="ib" data-n="reload" title="Neu laden">↻</button>
+   <div class="b-url"><button class="circ" data-n="circ" title="Tor-Kreis">🧅 <span class="lbl">Tor-Kreis</span></button><input spellcheck="false" autocomplete="off" placeholder="Suchen mit DuckDuckGo oder Adresse eingeben"></div>
+   <button class="ib" data-n="lvl" title="Sicherheitsstufe">🛡️</button><button class="ib" data-n="newid" title="Neue Identität">🧹</button></div>
+   <div class="b-content"></div>
+   <div class="bpop" data-p="circ" style="left:90px"><h5>Tor-Kreis für diese Seite</h5><div class="hops"></div><button class="btn" data-n="newcirc" style="width:100%;margin-top:10px">Neuer Tor-Kreis für diese Seite</button></div>
+   <div class="bpop" data-p="lvl" style="right:50px"><h5>Sicherheitsstufe</h5><div class="lvl">
+    <button data-l="0"><b>Standard</b><span>Alle Funktionen von Webseiten sind an.</span></button>
+    <button data-l="1"><b>Sicherer</b><span>JavaScript ist auf Nicht-HTTPS-Seiten aus.</span></button>
+    <button data-l="2"><b>Am sichersten</b><span>JavaScript ist überall aus. Nur statische Inhalte werden angezeigt.</span></button></div></div>`;
+  const C=$('.b-content',b),U=$('.b-url input',b);
+  const cur=()=>B.tabs[B.act],url=()=>cur().h[cur().i];
+  const hostOf=u=>{try{return new URL(u).host}catch(e){return u.split(':')[0]}};
+  const short=u=>{const h=hostOf(u);return h.length>30?h.slice(0,14)+'…'+h.slice(-10):h};
+  const title=u=>u==='about:tor'?'Neuer Tab':u.includes('check.torproject')?'Tor-Check':u.includes('duckduckgo')?'DuckDuckGo (Onion)':short(u);
+  function open(u){B.tabs.push({h:[u],i:0,c:newCircuit()});B.act=B.tabs.length-1;render()}
+  function go(u){u=u.trim();if(!u)return;
+    if(u.startsWith('vela:')){openApp('settings',u.slice(5));return}
+    if(!/^(about:|https?:\/\/)/.test(u)){if(/^[\w-]+(\.[\w-]+)+(\/.*)?$/.test(u))u='https://'+u;else u='https://duckduckgogg42xjoc72x3sjasowoarfbgcmvfimaftt6twagswzczad.onion/?q='+encodeURIComponent(u)}
+    const t=cur();const old=t.h[t.i];t.h=t.h.slice(0,t.i+1);t.h.push(u);t.i++;if(hostOf(u)!==hostOf(old))t.c=newCircuit();render()}
+  function page(u){
+    if(!SYS.tor)return `<div class="page home"><h2>⏳ Verbindung zu Tor …</h2><p>Der Tor Browser wartet, bis das System mit dem Tor-Netzwerk verbunden ist.</p></div>`;
+    if(u==='about:tor')return `<div class="page home"><svg width="70" height="70" viewBox="0 0 64 64"><circle cx="32" cy="34" r="26" fill="none" stroke="#a86fd0" stroke-width="4"/><circle cx="32" cy="34" r="17" fill="none" stroke="#8a52b4" stroke-width="4"/><circle cx="32" cy="34" r="8" fill="#7d4698"/></svg>
+      <h2>Du bist anonym unterwegs.</h2><p>Vela Secure leitet alles über Tor. Der Killswitch blockiert jede andere Verbindung.</p>
+      <form class="search"><input placeholder="Mit DuckDuckGo suchen (Onion-Dienst)"><button>Suchen</button></form>
+      <div class="cards"><div class="card" data-go="https://check.torproject.org"><div class="ic">✅</div><h4>Tor-Check</h4><p>Prüfen, ob du über Tor surfst.</p></div>
+      <div class="card" data-go="vela:security"><div class="ic">🛡️</div><h4>Sicherheit</h4><p>Alle Schutzfunktionen von Vela.</p></div>
+      <div class="card" data-go="vela:firewall"><div class="ic">🧱</div><h4>Firewall</h4><p>Killswitch testen und Live-Protokoll.</p></div>
+      <div class="card" data-go="http://2gzyxa5ihm7nsggfxnu52rck2vv4rvmdlkiu3zzui5du4xyclen53wid.onion"><div class="ic">🧅</div><h4>Tor Project (Onion)</h4><p>Ein echter Onion-Dienst. Diese Seite ist hier nur simuliert.</p></div></div></div>`;
+    if(u.includes('check.torproject'))return `<div class="page" style="text-align:center;padding-top:8vh"><div style="font-size:50px">🧅</div><h2 class="t" style="color:var(--ok);margin-top:10px">Glückwunsch! Dieser Browser nutzt Tor.</h2>
+      <p class="sub">Deine IP-Adresse für Webseiten: <code>${cur().c[2].ip}</code> (${cur().c[2].n})</p><div class="fake" style="text-align:left">Die Webseite sieht nur die Adresse des <b>Exit-Relays</b> und nie deine echte IP.</div></div>`;
+    if(u.includes('duckduckgo')){const q=esc(decodeURIComponent(u.split('?q=')[1]||''));return `<div class="page"><h2 class="t">🔎 ${q||'DuckDuckGo'}</h2><p class="sub">Die Suche läuft über den Onion-Dienst von DuckDuckGo, die Anfrage verlässt Tor nie.</p><div class="fake">Testversion: Hier können keine echten Suchergebnisse geladen werden, weil eine Webseite selbst keine Tor-Verbindung aufbauen kann. Auf dem Raspberry Pi siehst du hier die Ergebnisse für <b>„${q}“</b>.</div></div>`}
+    const onion=hostOf(u).endsWith('.onion');
+    return `<div class="page"><h2 class="t">${onion?'🧅':'🌐'} ${esc(short(u))}</h2><p class="sub">${onion?'Onion-Dienst: Die Verbindung ist Ende-zu-Ende verschlüsselt und verlässt Tor nie.':'Normale Webseite: Sie wird über 3 Tor-Relays abgerufen.'} Sicherheitsstufe: <b>${LV[SYS.level]}</b></p>
+      <div class="fake">Testversion: Diese Webseite ist hier nur simuliert. Auf dem echten Vela-Pi lädt der Tor Browser sie über den angezeigten Tor-Kreis (🧅).</div></div>`}
+  function hops(){const u=url(),onion=hostOf(u).endsWith('.onion');
+    $('.hops',b).innerHTML=`<div class="hop"><i></i>Dieser Raspberry Pi<small>verborgen</small></div>`+cur().c.map((h,k)=>`<div class="hop"><i></i>${h.f} ${h.n}<small>${k===0?'Guard · ':''}${h.ip}</small></div>`).join('')+(onion?`<div class="hop"><i></i>Onion-Relays<small>3 weitere</small></div>`:'')+`<div class="hop"><i></i>${u.startsWith('about:')?'(interne Seite)':esc(short(u))}<small></small></div>`}
+  function render(){
+    const T=$('.b-tabs',b);T.innerHTML='';
+    B.tabs.forEach((t,i)=>{const d=document.createElement('div');d.className='b-tab'+(i===B.act?' act':'');d.innerHTML=`<span>${esc(title(t.h[t.i]))}</span><b>✕</b>`;
+      d.onclick=e=>{if(e.target.tagName==='B'){B.tabs.splice(i,1);if(!B.tabs.length){open('about:tor');return}B.act=Math.min(B.act,B.tabs.length-1)}else B.act=i;render()};T.appendChild(d)});
+    const nb=document.createElement('button');nb.className='ib';nb.textContent='+';nb.style.marginBottom='3px';nb.onclick=()=>open('about:tor');T.appendChild(nb);
+    U.value=url()==='about:tor'?'':url();C.innerHTML=page(url());C.scrollTop=0;
+    $$('[data-go]',C).forEach(e=>e.onclick=()=>go(e.dataset.go));
+    const f=$('form',C);if(f)f.onsubmit=e=>{e.preventDefault();go($('input',f).value)};
+    win.setTitle(title(url())+' — Tor Browser');hops();
+    $$('.lvl button',b).forEach(x=>x.classList.toggle('on',+x.dataset.l===SYS.level))}
+  U.onkeydown=e=>{if(e.key==='Enter'){go(U.value);U.blur()}};U.onfocus=()=>U.select();
+  const pop=n=>{const p=$(`[data-p="${n}"]`,b);const o=p.classList.contains('on');$$('.bpop',b).forEach(x=>x.classList.remove('on'));if(!o)p.classList.add('on')};
+  b.addEventListener('pointerdown',e=>{if(!e.target.closest('.bpop,[data-n="circ"],[data-n="lvl"]'))$$('.bpop',b).forEach(x=>x.classList.remove('on'))});
+  $$('[data-n]',b).forEach(x=>x.onclick=async()=>{const n=x.dataset.n,t=cur();
+    if(n==='back'&&t.i>0){t.i--;render()}else if(n==='fwd'&&t.i<t.h.length-1){t.i++;render()}else if(n==='reload')render();
+    else if(n==='circ'||n==='lvl')pop(n);
+    else if(n==='newcirc'){t.c=newCircuit();hops();notify('🧅 Neuer Tor-Kreis','Diese Seite wird jetzt über andere Relays geladen.')}
+    else if(n==='newid'){C.style.transition='opacity .3s';C.style.opacity=0;await sleep(300);B.tabs=[];open('about:tor');C.style.opacity=1;notify('🧹 Neue Identität','Tabs, Cookies und Verlauf wurden gelöscht und neue Tor-Kreise aufgebaut.')}});
+  $$('.lvl button',b).forEach(x=>x.onclick=()=>{SYS.level=+x.dataset.l;render();notify('🛡️ Sicherheitsstufe',LV[SYS.level])});
+  win.cleanup.push(on('tor',render));
+  win.onArg=u=>{open(u)};
+  open(typeof arg==='string'?arg:'about:tor');
+}
+
+/* ================= App: Dateien ================= */
+function initFiles(win,arg){
+  let cwd=typeof arg==='string'?arg:HOME,sel=null;const hist=[cwd];let hi=0;const b=win.body;
+  b.innerHTML=`<div class="tool"><button class="ib" data-a="back">←</button><button class="ib" data-a="up">↑</button><div class="f-path"></div>
+    <button class="ib" data-a="newdir" title="Neuer Ordner">📁+</button><button class="ib" data-a="newfile" title="Neue Datei">📄+</button><button class="ib" data-a="del" title="Löschen">🗑️</button></div>
+    <div class="f-wrap"><div class="f-side"></div><div class="f-main"></div></div>`;
+  const places=[['🏠','Persönlicher Ordner',HOME],['🖥️','Schreibtisch',HOME+'/Schreibtisch'],['📄','Dokumente',HOME+'/Dokumente'],['⬇️','Downloads',HOME+'/Downloads'],['🖼️','Bilder',HOME+'/Bilder'],['💽','System','/']];
+  function nav(p,push=true){const n=node(p);if(!n||n.t!=='d')return;cwd=norm(p);sel=null;if(push){hist.splice(hi+1);hist.push(cwd);hi=hist.length-1}render()}
+  function render(){
+    $('.f-path',b).textContent=cwd;win.setTitle(cwd===HOME?'Persönlicher Ordner':cwd.split('/').pop()||'/');
+    $('.f-side',b).innerHTML='';places.forEach(([i,n,p])=>{const x=document.createElement('button');x.className=cwd===p?'on':'';x.innerHTML=`<span>${i}</span>${n}`;x.onclick=()=>nav(p);$('.f-side',b).appendChild(x)});
+    const m=$('.f-main',b);m.innerHTML='';const n=node(cwd);
+    const names=Object.keys(n.c||{}).filter(k=>!k.startsWith('.')||cwd!==HOME).sort((a,c)=>(n.c[a].t==='d'?0:1)-(n.c[c].t==='d'?0:1)||a.localeCompare(c));
+    if(!names.length)m.innerHTML='<div class="f-empty">Dieser Ordner ist leer</div>';
+    names.forEach(k=>{const it=document.createElement('div');it.className='f-it'+(sel===k?' sel':'');const nd=n.c[k]||{t:'d'};
+      it.innerHTML=`<span class="fi">${fIcon(k,nd)}</span><span>${esc(k)}</span>`;
+      it.onclick=()=>{sel=k;$$('.f-it',m).forEach(x=>x.classList.remove('sel'));it.classList.add('sel')};
+      it.ondblclick=()=>{const p=norm(cwd+'/'+k);if((node(p)||{}).t==='d')nav(p);else openPath(p)};
+      it.oncontextmenu=e=>{e.preventDefault();sel=k;ctxMenu(e.clientX,e.clientY,[['Öffnen',()=>it.ondblclick()],['Löschen',()=>del()]])};
+      m.appendChild(it)});
+  }
+  function del(){if(!sel)return;if(!rm(cwd+'/'+sel))notify('⛔ Keine Berechtigung','Systemdateien sind schreibgeschützt.');sel=null}
+  function ask(ph,cb){const t=$('.tool',b);const i=document.createElement('input');i.className='f-in';i.placeholder=ph;t.insertBefore(i,$('[data-a="newdir"]',b));i.focus();
+    i.onkeydown=e=>{if(e.key==='Enter'&&i.value.trim()){cb(i.value.trim());i.remove()}if(e.key==='Escape')i.remove()};i.onblur=()=>setTimeout(()=>i.remove(),150)}
+  $$('[data-a]',b).forEach(x=>x.onclick=()=>{const a=x.dataset.a;
+    if(a==='back'&&hi>0){hi--;nav(hist[hi],false)}else if(a==='up')nav(parentOf(cwd)[0]);
+    else if(a==='newdir')ask('Ordnername',n=>{if(!mkdir(cwd+'/'+n))notify('⛔ Nicht möglich','Name existiert schon oder Ordner ist schreibgeschützt.')});
+    else if(a==='newfile')ask('Dateiname.txt',n=>{if(!writeFile(cwd+'/'+n,''))notify('⛔ Nicht möglich','Ordner ist schreibgeschützt.')});
+    else if(a==='del')del()});
+  win.cleanup.push(on('fs',()=>render()));win.onArg=p=>nav(p);render();
+}
+
+/* ================= App: Terminal ================= */
+function initTerm(win){
+  const b=win.body;b.innerHTML='<div class="term"></div>';const T=$('.term',b);let cwd=HOME;const hist=[];let hi=0;
+  const out=h=>{const d=document.createElement('div');d.innerHTML=h;T.insertBefore(d,T.lastChild);T.scrollTop=T.scrollHeight};
+  const prompt=()=>`<span class="g">vela@vela</span>:<span class="p">${cwd.replace(HOME,'~')}</span>$`;
+  const line=document.createElement('div');line.className='line';line.innerHTML=`<span class="pr"></span><input spellcheck="false" autocomplete="off">`;T.appendChild(line);
+  const I=$('input',line);const setP=()=>$('.pr',line).innerHTML=prompt();setP();
+  T.onclick=()=>I.focus();setTimeout(()=>I.focus(),50);
+  out(`<span class="p">Vela Secure 1.0</span> <span class="m">· Debian 13 arm64 · Tor Browser 16.0</span><br><span class="m">Gib <b>help</b> ein, um alle Befehle zu sehen.</span><br>&nbsp;`);
+  const up=()=>{const s=Math.floor((Date.now()-SYS.boot)/1000);return `${Math.floor(s/60)} min, ${s%60} s`};
+  const CMD={
+   help:()=>`<pre>Befehle:
+  ls, cd, pwd, cat, mkdir, touch, rm, echo, clear, tree
+  neofetch, uname, whoami, date, uptime, free, df, ps
+  tor-status    Tor-Kreis und Status anzeigen
+  vela-status   Sicherheitsbericht
+  nft           Firewall-Regeln (nft list ruleset)
+  ip            Netzwerk-Adressen
+  ping, curl    Verbindungstest (zeigt den Killswitch)
+  torsocks curl https://...   Verbindung über Tor
+  apt update    System über Tor aktualisieren
+  open DATEI    Datei mit dem passenden Programm öffnen
+  firefox, tor-browser, files, editor, settings</pre>`,
+   ls:a=>{const p=norm(a[0]||'.',cwd);const n=node(p);if(!n)return `<span class="r">ls: '${esc(a[0])}' nicht gefunden</span>`;if(n.t!=='d')return esc(a[0]);
+     return Object.keys(n.c||{}).filter(k=>!k.startsWith('.')||a.includes('-a')).map(k=>(n.c[k]||{}).t==='d'?`<span class="p">${esc(k)}/</span>`:esc(k)).join('  ')||'<span class="m">(leer)</span>'},
+   cd:a=>{const p=norm(a[0]||'~',cwd);const n=node(p);if(!n||n.t!=='d')return `<span class="r">cd: ${esc(a[0])}: Verzeichnis nicht gefunden</span>`;cwd=p;setP();return ''},
+   pwd:()=>cwd,
+   cat:a=>{if(!a[0])return '<span class="r">cat: Datei angeben</span>';const n=node(norm(a[0],cwd));if(!n)return `<span class="r">cat: ${esc(a[0])}: Nicht gefunden</span>`;if(n.t==='d')return `<span class="r">cat: ${esc(a[0])}: Ist ein Verzeichnis</span>`;return `<pre>${esc(n.v||'')}</pre>`},
+   mkdir:a=>a[0]&&mkdir(norm(a[0],cwd))?'':`<span class="r">mkdir: nicht möglich</span>`,
+   touch:a=>{const p=norm(a[0]||'',cwd);if(node(p))return '';return writeFile(p,'')?'':`<span class="r">touch: Keine Berechtigung</span>`},
+   rm:a=>{const f=a.filter(x=>!x.startsWith('-'));return f[0]&&rm(norm(f[0],cwd))?'':`<span class="r">rm: nicht möglich (nicht gefunden oder schreibgeschützt)</span>`},
+   echo:a=>{const s=a.join(' ');const m=s.match(/^(.*?)\s*>\s*(\S+)$/);if(m){writeFile(norm(m[2],cwd),m[1].replace(/^["']|["']$/g,'')+'\n');return ''}return esc(s.replace(/^["']|["']$/g,''))},
+   clear:()=>{$$('div:not(.line)',T).forEach(d=>d.remove());return null},
+   tree:()=>{const walk=(n,pre)=>Object.keys(n.c||{}).filter(k=>!k.startsWith('.')).map((k,i,arr)=>{const last=i===arr.length-1;const c=n.c[k];return pre+(last?'└── ':'├── ')+(c.t==='d'?`<span class="p">${esc(k)}</span>`:esc(k))+(c.t==='d'?'\n'+walk(c,pre+(last?'    ':'│   ')):'')}).join('\n').replace(/\n+/g,'\n');return `<pre>${esc(cwd)}\n${walk(node(cwd),'')}</pre>`},
+   whoami:()=>'vela',date:()=>new Date().toLocaleString('de-DE'),uptime:()=>'läuft seit '+up(),
+   uname:a=>a.includes('-a')?'Linux vela 6.12.48+deb13-arm64 #1 SMP Debian aarch64 GNU/Linux':'Linux',
+   free:()=>`<pre>              gesamt   benutzt     frei
+Speicher:      905Mi     ${560+Math.floor(Math.random()*80)}Mi     ${200+Math.floor(Math.random()*60)}Mi
+Swap (zram):   678Mi     ${90+Math.floor(Math.random()*40)}Mi     ${540}Mi</pre>`,
+   df:()=>`<pre>Dateisystem     Größe Benutzt Verf. Verw% Eingehängt auf
+/dev/mmcblk0p2    29G    1,2G   27G    5% /
+/dev/mmcblk0p1   256M     62M  194M   25% /boot/firmware
+tmpfs            128M    1,1M  127M    1% /tmp</pre>`,
+   ps:()=>`<pre>  PID BENUTZER    %CPU %MEM BEFEHL
+    1 root         0.0  1.2 /sbin/init
+  412 debian-tor   2.1  6.8 /usr/bin/tor --defaults-torrc /usr/share/tor/tor-service-defaults-torrc
+  498 vela         1.4  4.0 labwc
+  521 vela         0.3  2.1 waybar
+  530 vela         0.0  0.6 mako
+  604 vela        12.8 31.5 /opt/tor-browser/Browser/firefox.real
+  640 vela         0.0  0.4 bash</pre>`,
+   neofetch:()=>`<pre><span class="p">    ╭───────╮   </span><b class="p">vela</b>@<b class="p">vela</b>
+<span class="p">   ╭┤ ╭───╮ ├╮  </span>-----------
+<span class="p">   ││ │ ● │ ││  </span><span class="p">OS:</span> Vela Secure 1.0 (Debian 13 trixie) aarch64
+<span class="p">   ╰┤ ╰───╯ ├╯  </span><span class="p">Host:</span> Raspberry Pi 3 Model B Rev 1.2
+<span class="p">    ╰───────╯   </span><span class="p">Kernel:</span> 6.12.48+deb13-arm64
+                <span class="p">Uptime:</span> ${up()}
+                <span class="p">Shell:</span> bash 5.2
+                <span class="p">Desktop:</span> labwc (Wayland)
+                <span class="p">Browser:</span> Tor Browser 16.0
+                <span class="p">CPU:</span> BCM2837 (4) @ 1.2GHz
+                <span class="p">Speicher:</span> ${560+Math.floor(Math.random()*80)}MiB / 905MiB
+                <span class="p">Tor:</span> <span class="g">verbunden</span>  <span class="p">Firewall:</span> <span class="g">Killswitch</span></pre>`,
+   'tor-status':()=>{if(!SYS.tor)return '<span class="y">Tor verbindet noch …</span>';const c=newCircuit();return `<pre><span class="g">● tor@default.service – aktiv</span>
+Bootstrap: 100% (done)    Brücke: ${SYS.bridge}
+Kreis:  Du → ${c[0].f} ${c[0].n} (${c[0].ip}) → ${c[1].f} ${c[1].n} → ${c[2].f} ${c[2].n} (Exit ${c[2].ip})</pre>`},
+   'vela-status':()=>`<pre>  <span class="p">VELA SECURE</span>
+  <span class="g">●</span> Tor                        ${SYS.tor?'verbunden (SOCKS 127.0.0.1:9050)':'<span class="y">verbindet …</span>'}
+  <span class="g">●</span> Killswitch-Firewall        aktiv – ${SYS.fwBlocked} Verbindungen blockiert
+  <span class="g">●</span> SSH / Fernzugriff          aus
+  <span class="g">●</span> Bluetooth                  aus
+  <span class="g">●</span> AppArmor                   aktiv
+  <span class="g">●</span> Logs                       nur im RAM
+  <span class="g">●</span> MAC-Adresse                zufällig (${SYS.mac})
+  <span class="g">●</span> Updates                    täglich über Tor</pre>`,
+   nft:()=>`<span class="r">nft: Operation nicht erlaubt (nur root)</span><br><span class="m">Tipp: cat /etc/nftables.conf</span>`,
+   ip:()=>`<pre>1: lo: &lt;LOOPBACK,UP&gt;  inet 127.0.0.1/8
+2: wlan0: &lt;BROADCAST,MULTICAST,UP&gt;  link/ether ${SYS.mac} (zufällig)
+    inet 192.168.178.${40+Math.floor(Math.random()*40)}/24  inet6 fe80::…/64 (Privacy Extensions)</pre>`,
+   ping:a=>{fwEvent(['vela','icmp',(a[0]||'?'),'ping']);return `<span class="r">ping: ${esc(a[0]||'')}: Senden nicht erlaubt (Killswitch – nur Tor darf ins Internet)</span>`},
+   curl:a=>{const u=a.find(x=>!x.startsWith('-'))||'';fwEvent(['vela','tcp',u.replace(/^https?:\/\//,'')+':443','curl ohne Tor']);return `<span class="r">curl: (7) Verbindung zu ${esc(u)} fehlgeschlagen: Operation nicht erlaubt</span><br><span class="m">Ohne Tor geht nichts raus. Versuche: torsocks curl ${esc(u)}</span>`},
+   torsocks:a=>{if(a[0]!=='curl')return '<span class="m">Benutzung: torsocks curl URL</span>';if(!SYS.tor)return '<span class="y">Tor verbindet noch …</span>';const c=newCircuit();return `<span class="g">✓ Verbindung über Tor (Exit: ${c[2].f} ${c[2].n}, ${c[2].ip})</span><br><span class="m">&lt;!DOCTYPE html&gt; … (Testversion: Inhalt simuliert)</span>`},
+   apt:a=>a[0]==='update'||a[0]==='upgrade'?`<span class="m">Hinweis: Updates laufen automatisch täglich als root über Tor (vela-update.timer).</span><br>Holen:1 tor+http://deb.debian.org/debian trixie InRelease<br>Holen:2 tor+http://security.debian.org trixie-security InRelease<br><span class="g">Alle Pakete sind aktuell.</span>`:'<span class="m">apt update | apt upgrade</span>',
+   sudo:()=>'<span class="r">sudo: Befehl nicht gefunden – in Vela Secure gibt es absichtlich keine Admin-Rechte.</span>',
+   su:()=>'<span class="r">su: Authentifizierung fehlgeschlagen (root ist gesperrt)</span>',
+   ssh:()=>'<span class="r">ssh: Befehl nicht gefunden (Fernzugriff ist in Vela deaktiviert)</span>',
+   open:a=>{const p=norm(a[0]||'',cwd);if(!node(p))return `<span class="r">open: ${esc(a[0]||'')}: nicht gefunden</span>`;openPath(p);return ''},
+   'tor-browser':()=>{openApp('browser');return ''},firefox:()=>'<span class="m">Firefox gibt es nicht – der Standardbrowser ist der Tor Browser. Starte mit: tor-browser</span>',
+   files:()=>{openApp('files',cwd);return ''},pcmanfm:()=>{openApp('files',cwd);return ''},editor:a=>{openApp('editor',a[0]?norm(a[0],cwd):undefined);return ''},mousepad:a=>CMD.editor(a),
+   settings:()=>{openApp('settings');return ''},exit:()=>{win.close();return null},
+  };
+  I.onkeydown=e=>{
+    if(e.key==='ArrowUp'){if(hi>0){hi--;I.value=hist[hi]}e.preventDefault();return}
+    if(e.key==='ArrowDown'){if(hi<hist.length-1){hi++;I.value=hist[hi]}else{hi=hist.length;I.value=''}e.preventDefault();return}
+    if(e.key==='Tab'){e.preventDefault();const parts=I.value.split(' ');const last=parts.pop();const [d,pre]=last.includes('/')?[last.slice(0,last.lastIndexOf('/')+1),last.slice(last.lastIndexOf('/')+1)]:['',last];
+      const n=node(norm(d||'.',cwd));if(n&&n.c){const m=Object.keys(n.c).filter(k=>k.startsWith(pre));if(m.length===1){parts.push(d+m[0]+(n.c[m[0]].t==='d'?'/':''));I.value=parts.join(' ')}}return}
+    if(e.key==='l'&&e.ctrlKey){e.preventDefault();CMD.clear();return}
+    if(e.key!=='Enter')return;
+    const v=I.value.trim();out(prompt()+' '+esc(v));I.value='';if(!v)return;hist.push(v);hi=hist.length;
+    const parts=v.match(/"[^"]*"|'[^']*'|\S+/g)||[];const c=parts.shift();const f=CMD[c];
+    if(!f){out(`<span class="r">${esc(c)}: Befehl nicht gefunden</span> <span class="m">(help für Hilfe)</span>`);return}
+    const r=f(parts.map(p=>p.replace(/^["']|["']$/g,'')));if(r)out(r);
+  };
+}
+
+/* ================= App: Texteditor ================= */
+function initEditor(win,arg){
+  let path=typeof arg==='string'?arg:null,dirty=false;const b=win.body;
+  b.innerHTML=`<div class="tool"><button class="ib" data-a="new">📄 Neu</button><button class="ib" data-a="save">💾 Speichern</button><span class="nm" style="flex:1;color:var(--mut);font-size:12.5px;margin-left:6px"></span><span class="ro tag w" style="display:none">SCHREIBGESCHÜTZT</span></div><textarea class="ed" spellcheck="false"></textarea>`;
+  const ta=$('textarea',b);
+  const ro=()=>path&&!path.startsWith(HOME+'/');
+  function load(){const n=path?node(path):null;ta.value=n?n.v||'':'';dirty=false;upd()}
+  function upd(){const nm=path?path.split('/').pop():'Unbenannt';win.setTitle((dirty?'● ':'')+nm+' — Texteditor');$('.nm',b).textContent=path||'Neue Datei (wird in ~/Dokumente gespeichert)';$('.ro',b).style.display=ro()?'':'none';ta.readOnly=ro()}
+  function save(){if(ro())return notify('⛔ Schreibgeschützt','Systemdateien kann nur root ändern.');
+    if(!path){let i=1;while(node(HOME+'/Dokumente/Dokument '+i+'.txt'))i++;path=HOME+'/Dokumente/Dokument '+i+'.txt'}
+    writeFile(path,ta.value);dirty=false;upd();notify('💾 Gespeichert',path.replace(HOME,'~'))}
+  ta.oninput=()=>{if(!dirty){dirty=true;upd()}};
+  ta.onkeydown=e=>{if((e.ctrlKey||e.metaKey)&&e.key==='s'){e.preventDefault();save()}};
+  $('[data-a="save"]',b).onclick=save;$('[data-a="new"]',b).onclick=()=>openApp('editor');
+  load();setTimeout(()=>ta.focus(),50);
+}
+
+/* ================= App: Bildbetrachter ================= */
+function initViewer(win,arg){const n=node(arg)||{};const i=+(String(n.v||'#img0').replace('#img',''))||0;
+  win.setTitle(String(arg).split('/').pop()+' — Bildbetrachter');
+  win.body.innerHTML=`<div class="imgv"><div style="width:86%;height:82%;border-radius:10px;background:${WALLS[i%WALLS.length]};box-shadow:0 10px 40px #000"></div></div>
+  <div class="tool" style="border-top:1px solid var(--line);border-bottom:0"><button class="ib" data-a="w">🖼️ Als Hintergrund verwenden</button></div>`;
+  $('[data-a="w"]',win.body).onclick=()=>setWall(i%WALLS.length)}
+
+/* ================= App: Rechner ================= */
+function initCalc(win){
+  const b=win.body;b.innerHTML=`<div class="calc"><div class="cdisp"><small></small><div>0</div></div><div class="ckeys"></div></div>`;
+  let expr='',res='0';const K=['C','(',')','÷','7','8','9','×','4','5','6','−','1','2','3','+','±','0',',','='];
+  const D=$('.cdisp div',b),S=$('.cdisp small',b);
+  const upd=()=>{D.textContent=expr||res;S.textContent=expr?'':''};
+  function calc(){try{const js=expr.replace(/×/g,'*').replace(/÷/g,'/').replace(/−/g,'-').replace(/,/g,'.');if(!/^[\d+\-*/().\s]+$/.test(js))throw 0;
+    let r=Function('"use strict";return ('+js+')')();if(!isFinite(r))throw 0;r=Math.round(r*1e10)/1e10;S.textContent=expr+' =';res=String(r).replace('.',',');expr='';D.textContent=res}catch(e){D.textContent='Fehler';expr=''}}
+  function press(k){if(k==='C'){expr='';res='0';S.textContent=''}else if(k==='='){calc();return}else if(k==='±'){expr=expr?'−('+expr+')':(res!=='0'?'−'+res:'')}
+    else{if(!expr&&/[+−×÷]/.test(k)&&res!=='0')expr=res;expr+=k}D.textContent=expr||res}
+  K.forEach(k=>{const x=document.createElement('button');x.textContent=k;if(/[÷×−+]/.test(k))x.className='op';if(k==='=')x.className='eq';x.onclick=()=>press(k);$('.ckeys',b).appendChild(x)});
+  const kd=e=>{if(WM.focus!==win)return;const m={'*':'×','/':'÷','-':'−','+':'+','Enter':'=','=':'=','Backspace':'BS','Escape':'C',',':',','.':',','(':'(',')':')'};
+    let k=/^\d$/.test(e.key)?e.key:m[e.key];if(!k)return;e.preventDefault();if(k==='BS'){expr=expr.slice(0,-1);D.textContent=expr||res;return}press(k)};
+  document.addEventListener('keydown',kd);win.cleanup.push(()=>document.removeEventListener('keydown',kd));upd();
+}
+
+/* ================= App: Systemmonitor ================= */
+function initMonitor(win){
+  const b=win.body;b.innerHTML=`<div class="mon"><div class="cpus"></div><div class="box"><div class="row"><div>Arbeitsspeicher<small class="ram"></small></div><span class="tag ok">zram aktiv</span></div>
+  <div class="row"><div>Netzwerk<small>Nur Tor (Benutzer debian-tor) darf Daten senden</small></div><span class="tag ok net"></span></div>
+  <div class="row"><div>Temperatur<small>SoC BCM2837</small></div><span class="tag w temp"></span></div></div>
+  <table><thead><tr><th>PID</th><th>Benutzer</th><th>CPU</th><th>RAM</th><th>Prozess</th></tr></thead><tbody></tbody></table></div>`;
+  const P=[[1,'root','init'],[412,'debian-tor','tor'],[455,'root','systemd-networkd'],[470,'root','wpa_supplicant'],[498,'vela','labwc'],[521,'vela','waybar'],[604,'vela','firefox.real (Tor Browser)'],[640,'vela','bash']];
+  const cp=$('.cpus',b);for(let i=0;i<4;i++)cp.innerHTML+=`<div class="cpu">Kern ${i+1}<b>0%</b><div class="mb"><i></i></div></div>`;
+  function upd(){$$('.cpu',b).forEach(c=>{const v=Math.floor(5+Math.random()*(SYS.tor?45:80));$('b',c).textContent=v+'%';$('i',c).style.width=v+'%'});
+    const ram=560+Math.floor(Math.random()*90);$('.ram',b).textContent=`${ram} MiB von 905 MiB benutzt · zram ${90+Math.floor(Math.random()*40)} MiB (zstd, ~3:1)`;
+    $('.net',b).textContent=`↓ ${(Math.random()*180).toFixed(0)} KB/s über Tor`;$('.temp',b).textContent=(48+Math.random()*8).toFixed(1)+' °C';
+    $('tbody',b).innerHTML=P.map(p=>{const c=p[2].startsWith('firefox')?(8+Math.random()*20):p[2]==='tor'?(1+Math.random()*4):Math.random()*1.5;const m=p[2].startsWith('firefox')?31:p[2]==='tor'?6.8:Math.random()*3;
+      return `<tr><td>${p[0]}</td><td>${p[1]}</td><td>${c.toFixed(1)}%</td><td>${m.toFixed(1)}%</td><td>${esc(p[2])}</td></tr>`}).join('')}
+  upd();const t=setInterval(upd,1500);win.cleanup.push(()=>clearInterval(t));
+}
+
+/* ================= App: Einstellungen ================= */
+function setWall(i){SYS.wall=i;store.set('wall',i);$('#wall').style.background=WALLS[i];emit('wall')}
+function initSettings(win,arg){
+  const b=win.body;let sec=typeof arg==='string'?arg:'network';
+  const SEC=[['network','📶','Netzwerk'],['look','🎨','Darstellung'],['security','🛡️','Sicherheit'],['firewall','🧱','Firewall'],['tor','🧅','Tor'],['about','ℹ️','Über Vela']];
+  b.innerHTML=`<div class="s-wrap"><div class="s-side"></div><div class="s-main"></div></div>`;
+  const R=(n,s,t,c='ok')=>`<div class="row"><div>${n}<small>${s}</small></div><span class="tag ${c}">${t}</span></div>`;
+  const NETS=[['FRITZ!Box 7590 XY',78,'WPA2'],['Vodafone-4G2A',54,'WPA2'],['Telekom-8B12',41,'WPA3'],['Gast-WLAN',33,'offen']];
+  function render(){
+    $('.s-side',b).innerHTML='';SEC.forEach(([k,i,n])=>{const x=document.createElement('button');x.className=k===sec?'on':'';x.innerHTML=`<span>${i}</span>${n}`;x.onclick=()=>{sec=k;render()};$('.s-side',b).appendChild(x)});
+    const m=$('.s-main',b);win.setTitle('Einstellungen — '+SEC.find(s=>s[0]===sec)[2]);
+    if(sec==='network'){m.innerHTML=`<h3>Netzwerk</h3><p class="sub">Vela sendet dem Router keinen Gerätenamen und benutzt eine zufällige MAC-Adresse.</p>
+      <div class="box">${NETS.map(n=>`<div class="row"><div>${n[0]}<small>${n[2]} · Signal ${n[1]}%</small></div>${SYS.wifi===n[0]?'<button class="btn g" data-w="">Trennen</button>':`<button class="btn" data-w="${n[0]}">Verbinden</button>`}</div>`).join('')}</div>
+      <div class="box">${R('MAC-Adresse',SYS.mac,'ZUFÄLLIG')}<div class="row"><div>Neue MAC-Adresse<small>Wechselt die Hardware-Adresse sofort</small></div><button class="btn g" data-mac>Neu erzeugen</button></div></div>
+      <p class="sub" style="font-size:12.5px">Auf dem echten Pi wird das WLAN in <code>vela-wlan.txt</code> auf der SD-Karte eingetragen.</p>`;
+      $$('[data-w]',m).forEach(x=>x.onclick=async()=>{const w=x.dataset.w;if(!w){SYS.wifi='';notify('📶 WLAN getrennt','');render();return}x.textContent='Verbinde …';await sleep(900);SYS.wifi=w;notify('📶 Verbunden',w+' · neue zufällige MAC');SYS.mac=randMac();render()});
+      $('[data-mac]',m).onclick=()=>{SYS.mac=randMac();notify('🎭 Neue MAC-Adresse',SYS.mac);render()}}
+    if(sec==='look'){m.innerHTML=`<h3>Darstellung</h3><p class="sub">Hintergrundbild auswählen</p><div class="walls">${WALLS.map((w,i)=>`<button data-i="${i}" class="${i===SYS.wall?'on':''}" style="background:${w}"></button>`).join('')}</div>`;
+      $$('[data-i]',m).forEach(x=>x.onclick=()=>{setWall(+x.dataset.i);render()})}
+    if(sec==='security'){m.innerHTML=`<h3>Sicherheit</h3><p class="sub">Alle Schutzfunktionen von Vela Secure</p>
+      <div class="box">${R('Tor','System-Dienst, Stream-Isolation pro Webseite',SYS.tor?'VERBUNDEN':'VERBINDET',SYS.tor?'ok':'w')}${R('Killswitch-Firewall','Nur der Tor-Dienst darf ins Internet','AKTIV')}${R('DNS-Leck-Schutz','Webseitennamen werden nur über Tor aufgelöst','AKTIV')}${R('Tor Browser','Standardbrowser · Stufe: '+LV[SYS.level],'AKTIV')}</div>
+      <div class="box">${R('SSH / Fernzugriff','Dienst maskiert, kein Port offen','AUS')}${R('Bluetooth','Kernelmodule gesperrt','AUS')}${R('Admin-Rechte','root gesperrt, kein sudo installiert','GESPERRT')}${R('AppArmor','Programme dürfen nur, was sie müssen','AKTIV')}${R('Kernel-Härtung','init_on_free, kptr_restrict, BPF aus, ptrace_scope=2','AKTIV')}${R('Logs','Nur im RAM, nach dem Ausschalten weg','FLÜCHTIG')}${R('Automatische Updates','Täglich über Tor','AN')}</div>`}
+    if(sec==='firewall'){m.innerHTML=`<h3>Firewall & Killswitch</h3><p class="sub">Alles ist gesperrt, nur Tor darf ins Internet. Fällt die Firewall aus, startet Tor nicht.</p>
+      <div class="box">${R('Eingehend','alles blockiert, außer Antworten auf eigene Verbindungen','DROP','bad')}${R('Ausgehend · debian-tor','der Tor-Dienst','ERLAUBT')}${R('Ausgehend · Uhrzeit (NTP)','Nötig, weil der Pi keine Batterie-Uhr hat','UDP 123','w')}${R('Ausgehend · alles andere','Apps, direkte Verbindungen, DNS ohne Tor','DROP','bad')}</div>
+      <div class="box" style="padding:14px 16px"><b style="font-size:13.5px">Killswitch testen</b><div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px"><button class="btn" data-t="d">Direkt zu google.com</button><button class="btn g" data-t="n">DNS an 8.8.8.8</button><button class="btn g" data-t="t">Über Tor</button></div><div class="tres" style="margin-top:10px;font-size:13.5px"></div></div>
+      <b style="font-size:13.5px;display:block;margin:6px 0 8px">Live-Protokoll · <span class="cnt">${SYS.fwBlocked}</span> blockiert</b><div class="fwlog">${SYS.fwLog.join('<br>')||'<span style="color:#666">Noch nichts blockiert …</span>'}</div>`;
+      const r=$('.tres',m);
+      $$('[data-t]',m).forEach(x=>x.onclick=async()=>{const t=x.dataset.t;
+        if(t==='d'){r.innerHTML='⏳ verbinde mit 142.250.185.78:443 …';await sleep(800);fwEvent(['vela','tcp','142.250.185.78:443','Killswitch-Test']);r.innerHTML='<span style="color:var(--bad)">✕ Blockiert.</span> Ohne Tor kommt keine Verbindung raus.'}
+        if(t==='n'){r.innerHTML='⏳ frage 8.8.8.8 …';await sleep(700);fwEvent(['vela','udp','8.8.8.8:53','DNS-Leck-Test']);r.innerHTML='<span style="color:var(--bad)">✕ Blockiert.</span> Niemand im Netzwerk sieht, welche Seiten du besuchst.'}
+        if(t==='t'){r.innerHTML='⏳ baue Tor-Kreis auf …';await sleep(1100);const c=newCircuit();r.innerHTML=`<span style="color:var(--ok)">✓ Über Tor:</span> ${c.map(h=>h.f+' '+h.n).join(' → ')} → google.com`}})}
+    if(sec==='tor'){m.innerHTML=`<h3>Tor</h3><p class="sub">Verbindung zum Tor-Netzwerk</p>
+      <div class="box">${R('Status',SYS.tor?'Bootstrap 100 %':'Verbindet …',SYS.tor?'VERBUNDEN':'…',SYS.tor?'ok':'w')}
+      <div class="row"><div>Brücke<small>Nur in Ländern mit Zensur nötig</small></div><select>${['Keine','obfs4','Snowflake','meek-azure'].map(x=>`<option ${x===SYS.bridge?'selected':''}>${x}</option>`).join('')}</select></div>
+      <div class="row"><div>Neue Tor-Kreise<small>Alle Verbindungen bekommen neue Relays</small></div><button class="btn g" data-nc>Neu aufbauen</button></div></div>`;
+      $('select',m).onchange=async e=>{SYS.bridge=e.target.value;SYS.tor=false;updTor();render();await sleep(1500);SYS.tor=true;updTor();emit('tor');render();notify('🧅 Tor neu verbunden','Brücke: '+SYS.bridge)};
+      $('[data-nc]',m).onclick=()=>notify('🧅 Neue Tor-Kreise','Alle neuen Verbindungen nutzen andere Relays.')}
+    if(sec==='about'){m.innerHTML=`<h3>Über Vela</h3><p class="sub">Vela Secure 1.0 · Tor Edition</p>
+      <div class="box">${R('System','Debian 13 „trixie“ · arm64','1.0')}${R('Gerät','Raspberry Pi 3 Model B · BCM2837 · 1 GB RAM','PI 3')}${R('Kernel','6.12 (Debian, gehärtet)','LINUX')}${R('Desktop','labwc (Wayland) · waybar · foot · pcmanfm','WAYLAND')}${R('Browser','Tor Browser 16.0 (ARM64)','STANDARD')}${R('Download-Größe','vela-secure-pi3.img.xz','< 430 MB','w')}</div>
+      <div style="display:flex;gap:8px"><button class="btn g" data-r>Testversion zurücksetzen</button></div>`;
+      $('[data-r]',m).onclick=()=>{FS=JSON.parse(JSON.stringify(DEFAULT_FS));saveFS();setWall(0);emit('fs');notify('↺ Zurückgesetzt','Dateien und Hintergrund sind wieder wie neu.');render()}}
+  }
+  const f=()=>{if(sec==='firewall'){const l=$('.fwlog',b);if(l)l.innerHTML=SYS.fwLog.join('<br>');const c=$('.cnt',b);if(c)c.textContent=SYS.fwBlocked}};
+  win.cleanup.push(on('fw',f),on('tor',()=>{if(sec==='security'||sec==='tor')render()}));
+  win.onArg=s=>{sec=s;render()};render();
+}
+
+boot();
+</script>
+</body>
+</html>

@@ -1,0 +1,41 @@
+name: Vela Secure bauen
+
+on:
+  workflow_dispatch: {}
+  push:
+    branches: [main]
+    paths: ['build.sh', 'installer/**', '.github/workflows/**']
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    # Normaler GitHub-Rechner (geht auch bei privaten Repos); ARM wird per qemu emuliert
+    runs-on: ubuntu-24.04
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Werkzeuge installieren
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y debootstrap debian-archive-keyring parted \
+            dosfstools e2fsprogs xz-utils curl gpg gpgv nftables cpio \
+            qemu-user-static binfmt-support
+          ls /proc/sys/fs/binfmt_misc/ | grep -i aarch64
+
+      - name: Vela bauen (Image + Installer)
+        run: sudo ./build.sh
+
+      - name: Release veröffentlichen
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="v$(date -u +%Y.%m.%d-%H%M)"
+          sudo chown "$(id -u)" vela-installer.run vela-secure-pi3.img.xz vela-secure-pi3.img.xz.sha256
+          gh release create "$TAG" \
+            --title "Vela Secure $TAG" \
+            --notes "**vela-installer.run** – auf einen USB-Stick kopieren und am Raspberry Pi starten (sudo bash vela-installer.run).
+          **vela-secure-pi3.img.xz** – alternativ mit dem Raspberry Pi Imager flashen." \
+            vela-installer.run vela-secure-pi3.img.xz vela-secure-pi3.img.xz.sha256
