@@ -170,7 +170,16 @@ hdmi_force_hotplug=1
 EOF
 echo "quiet loglevel=3 apparmor=1 security=apparmor init_on_alloc=1 init_on_free=1 slab_nomerge page_alloc.shuffle=1 randomize_kstack_offset=on" \
   > "$ROOT/etc/default/raspi-extra-cmdline"
-in_root "for k in /boot/vmlinuz-*; do /etc/kernel/postinst.d/z50-raspi-firmware \${k#/boot/vmlinuz-}; done"
+# Wichtig: der Hook läuft nur mit DEB_MAINT_PARAMS=configure, sonst bricht er still ab
+in_root "for k in /boot/vmlinuz-*; do DEB_MAINT_PARAMS=configure /etc/kernel/postinst.d/z50-raspi-firmware \${k#/boot/vmlinuz-}; done"
+# Startkonfiguration prüfen – ohne die richtige root= startet der Pi nicht
+grep -q 'root=LABEL=RASPIROOT' "$ROOT/boot/firmware/cmdline.txt" || { cat "$ROOT/boot/firmware/cmdline.txt"; die "cmdline.txt ist falsch (root=)"; }
+grep -q 'apparmor=1' "$ROOT/boot/firmware/cmdline.txt" || die "cmdline.txt: Sicherheitsoptionen fehlen"
+grep -q 'gpu_mem=64' "$ROOT/boot/firmware/config.txt" || die "config.txt: Vela-Einstellungen fehlen"
+for f in bcm2837-rpi-3-b.dtb bcm2837-rpi-3-b-plus.dtb bootcode.bin start.elf; do
+  [ -f "$ROOT/boot/firmware/$f" ] || die "Boot-Datei fehlt: $f"
+done
+say "     Startkonfiguration OK: $(cat "$ROOT/boot/firmware/cmdline.txt")"
 
 # BusyBox (64- und 32-Bit) für den USB-Installer holen – landet nicht im Image
 in_root "dpkg --add-architecture armhf && apt-get update -q && cd /tmp && apt-get download busybox-static:arm64 busybox-static:armhf"
