@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=Vela installieren
+Name[de]=Vela installieren
+Comment=Installiert Vela Secure auf diesem Raspberry Pi
+Icon=system-software-install
+Exec=sh -c 'exec bash "$(dirname "$0")/vela-installer.run"' %k
+Terminal=false
+Categories=System;

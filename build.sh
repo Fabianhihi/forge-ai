@@ -651,6 +651,7 @@ echo "$IMG_SHA  $OUT" > "$INST/$OUT.sha256"
 # Eine einzige Datei: Installer-Skript + angehängter Inhalt
 RUN="$HERE/vela-installer.run"
 { cat "$HERE/installer/install-vela.sh"; echo "__VELA_PAYLOAD_IMAGE__"; tar -C "$INST" -cf - .; } > "$RUN"
+cp "$HERE/installer/Vela installieren.desktop" "$HERE/"
 chmod 755 "$RUN"
 say "Fertig: vela-installer.run  ($(( $(stat -c%s "$RUN") / 1024 / 1024 )) MB) – auf einen USB-Stick kopieren"
 say "Fertig! Zwei Wege:"

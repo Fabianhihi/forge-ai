@@ -14,11 +14,13 @@ DU BRAUCHST
    - mindestens 1 GB freien Platz auf der SD-Karte
 
 SO GEHT'S
-1. Kopiere vela-installer.run auf den USB-Stick.
-2. Stecke den Stick in den Pi. Öffne das Terminal und tippe:
-
-       sudo bash /media/*/*/vela-installer.run
-
+1. Kopiere BEIDE Dateien auf den USB-Stick:
+      vela-installer.run
+      Vela installieren.desktop
+2. Stecke den Stick in den Pi und öffne ihn im Dateimanager.
+   Klicke doppelt auf "Vela installieren". Wenn gefragt wird: "Ausführen".
+   Es öffnet sich ein Terminal-Fenster mit dem Installer.
+   (Alternativ im Terminal:  sudo bash /media/*/*/vela-installer.run)
 3. Der Installer baut Vela jetzt automatisch auf deinem Pi.
    Das dauert etwa 1–2 Stunden. Einfach laufen lassen.
    Raspberry Pi OS bleibt dabei noch unverändert.
