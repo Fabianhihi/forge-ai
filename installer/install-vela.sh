@@ -164,6 +164,7 @@ if [ "$ARG" = "--worker" ]; then
   for f in "$IMG.size" "$IMG.sha256" "vela-installer-$ARCH.gz"; do
     [ -f "$DIR/$f" ] || wdie "Datei fehlt auf dem Stick: $f"
   done
+  [ -r /sys/block/mmcblk0/size ] || wdie "Keine SD-Karte (mmcblk0) gefunden."
   SD_BYTES=$(( $(cat /sys/block/mmcblk0/size) * 512 ))
   NEED=$(cat "$DIR/$IMG.size")
   [ "$SD_BYTES" -ge "$NEED" ] || wdie "SD-Karte zu klein (mind. $((NEED/1000000)) MB)."
