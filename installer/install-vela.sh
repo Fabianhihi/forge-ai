@@ -61,22 +61,7 @@ case "$(uname -m)" in
 esac
 echo "  Kernel:       $(uname -m) ($ARCH)"
 
-# --- Inhalt dieser Datei auf den Stick auspacken ---
-LINE="$(awk '/^__VELA_PAYLOAD__$/ {print NR + 1; exit}' "$SELF")"
-[ -n "$LINE" ] || die "Installer-Datei ist beschädigt (kein Inhalt gefunden)."
-if ! ( [ -f "$DIR/$IMG.xz.sha256" ] && cd "$DIR" && sha256sum -c --quiet "$IMG.xz.sha256" ) 2>/dev/null; then
-  echo
-  echo "  Packe Vela auf dem USB-Stick aus (ca. 1–2 Minuten) ..."
-  rm -rf "$DIR"; mkdir -p "$DIR"
-  tail -n +"$LINE" "$SELF" | tar -x -C "$DIR" || die "Auspacken fehlgeschlagen. Ist genug Platz auf dem Stick (mind. 1 GB frei)?"
-  sync
-fi
-
-for f in "$IMG.xz" "$IMG.xz.sha256" "$IMG.size" "$IMG.sha256" "vela-installer-$ARCH.gz"; do
-  [ -f "$DIR/$f" ] || die "Datei fehlt auf dem Stick: $f"
-done
-
-FS="$(findmnt -no FSTYPE -T "$DIR" || true)"
+FS="$(findmnt -no FSTYPE -T "$(dirname "$SELF")" || true)"
 echo "  Stick-Format: ${FS:-?}"
 case "$FS" in
   vfat|msdos) ;;
@@ -84,14 +69,83 @@ case "$FS" in
   *) die "Bitte den USB-Stick als FAT32 formatieren (gerade: $FS)." ;;
 esac
 
+# --- Inhalt dieser Datei: fertiges Image ODER Bauplan ---
+MARK="$(grep -a -m1 -nE '^__VELA_PAYLOAD_(IMAGE|SOURCE)__$' "$SELF" || true)"
+[ -n "$MARK" ] || die "Installer-Datei ist beschädigt (kein Inhalt gefunden)."
+LINE=$(( ${MARK%%:*} + 1 ))
+MODE="${MARK#*:}"; MODE="${MODE#__VELA_PAYLOAD_}"; MODE="${MODE%__}"
+mkdir -p "$DIR"
+
+built_ok() {  # Ist Vela auf dem Stick schon fertig gebaut?
+  [ -f "$DIR/$IMG" ] && [ -f "$DIR/$IMG.size" ] && [ -f "$DIR/$IMG.sha256" ] && \
+  [ -f "$DIR/vela-installer-$ARCH.gz" ] && \
+  [ "$(stat -c%s "$DIR/$IMG")" = "$(cat "$DIR/$IMG.size")" ]
+}
+
+if [ "$MODE" = IMAGE ]; then
+  # Fertiges Image steckt in dieser Datei
+  if ! ( [ -f "$DIR/$IMG.xz.sha256" ] && cd "$DIR" && sha256sum -c --quiet "$IMG.xz.sha256" ) 2>/dev/null; then
+    echo; echo "  Packe Vela auf dem USB-Stick aus (ca. 1–2 Minuten) ..."
+    rm -rf "$DIR"; mkdir -p "$DIR"
+    tail -n +"$LINE" "$SELF" | tar -x -C "$DIR" || die "Auspacken fehlgeschlagen. Ist genug Platz auf dem Stick (mind. 1 GB frei)?"
+    sync
+    ( cd "$DIR" && sha256sum -c --quiet "$IMG.xz.sha256" ) || die "Das Image ist beschädigt. Bitte vela-installer.run neu auf den Stick kopieren."
+  fi
+  green "  Vela-Image in Ordnung."
+else
+  # Bauplan: Vela wird jetzt automatisch hier auf dem Pi gebaut
+  rm -rf "$DIR/src"; mkdir -p "$DIR/src"
+  tail -n +"$LINE" "$SELF" | tar -x -C "$DIR/src" || die "Auspacken fehlgeschlagen."
+  if built_ok; then
+    green "  Vela ist auf dem Stick schon fertig gebaut – wird direkt verwendet."
+  else
+    echo
+    lila  "  Vela wird jetzt automatisch auf deinem Pi gebaut."
+    echo  "  Das dauert etwa 1–2 Stunden. Der Pi braucht Internet (LAN oder WLAN)."
+    echo  "  Du kannst ihn einfach laufen lassen. Raspberry Pi OS bleibt dabei unverändert."
+    echo
+    FREE_STICK=$(df -B1 --output=avail "$DIR" | tail -1)
+    [ "$FREE_STICK" -ge 2600000000 ] || die "Zu wenig Platz auf dem USB-Stick (mind. 2,6 GB frei, also ein Stick ab 4 GB)."
+    FREE_SD=$(df -B1 --output=avail /var/tmp | tail -1)
+    [ "$FREE_SD" -ge 1000000000 ] || die "Zu wenig Platz auf der SD-Karte (mind. 1 GB frei zum Bauen)."
+    curl -fsI --max-time 15 https://deb.debian.org >/dev/null 2>&1 || die "Keine Internetverbindung. Bitte LAN oder WLAN verbinden."
+
+    echo "  [1/2] Werkzeuge installieren ..."
+    PKGS="debootstrap debian-archive-keyring parted dosfstools e2fsprogs xz-utils curl gpg gpgv nftables cpio"
+    [ "$(uname -m)" = aarch64 ] || PKGS="$PKGS qemu-user-static binfmt-support"
+    apt-get update -q >/dev/null || die "apt-get update fehlgeschlagen."
+    # shellcheck disable=SC2086
+    DEBIAN_FRONTEND=noninteractive apt-get install -y -q $PKGS >/dev/null || die "Werkzeuge konnten nicht installiert werden."
+
+    echo "  [2/2] Vela bauen – Protokoll: /var/tmp/vela-build.log"
+    rm -f "$DIR/$IMG" "$DIR/$IMG.size" "$DIR/$IMG.sha256"
+    ( cd "$DIR" && LOCAL_INSTALL_DIR="$DIR" WORK=/var/tmp/vela-build bash "$DIR/src/build.sh" ) > /var/tmp/vela-build.log 2>&1 &
+    BP=$!
+    T0=$(date +%s)
+    while kill -0 "$BP" 2>/dev/null; do
+      STEP="$(grep -a '\[vela\]' /var/tmp/vela-build.log 2>/dev/null | tail -1 | sed 's/\x1b\[[0-9;]*m//g; s/^\[vela\] *//')"
+      MIN=$(( ($(date +%s) - T0) / 60 ))
+      printf '\r  %3d min │ %-60.60s' "$MIN" "${STEP:-startet ...}"
+      sleep 5
+    done
+    echo
+    if ! wait "$BP"; then
+      tail -n 15 /var/tmp/vela-build.log
+      die "Der Bau ist fehlgeschlagen. Das ganze Protokoll steht in /var/tmp/vela-build.log"
+    fi
+    rm -rf /var/tmp/vela-build
+    built_ok || die "Bau unvollständig – siehe /var/tmp/vela-build.log"
+    green "  Vela wurde erfolgreich gebaut!"
+  fi
+fi
+
+for f in "$IMG.size" "$IMG.sha256" "vela-installer-$ARCH.gz"; do
+  [ -f "$DIR/$f" ] || die "Datei fehlt auf dem Stick: $f"
+done
+
 SD_BYTES=$(( $(cat /sys/block/mmcblk0/size) * 512 ))
 NEED=$(cat "$DIR/$IMG.size")
 [ "$SD_BYTES" -ge "$NEED" ] || die "SD-Karte zu klein (mind. $((NEED/1000000)) MB)."
-
-echo
-echo "  Prüfe das Vela-Image auf dem Stick (dauert ca. 1 Minute) ..."
-( cd "$DIR" && sha256sum -c --quiet "$IMG.xz.sha256" ) || die "Das Image ist beschädigt. Bitte vela-installer.run neu auf den Stick kopieren."
-green "  Image in Ordnung."
 
 # --- Bestätigung ---
 echo

@@ -24,7 +24,7 @@ OUT="${OUT:-vela-secure-pi3.img}"
 MAX_XZ_MB="${MAX_XZ_MB:-430}"
 VUSER="vela"
 HERE="$(cd "$(dirname "$0")" && pwd)"
-WORK="$HERE/work"
+WORK="${WORK:-$HERE/work}"
 ROOT="$WORK/root"
 TB_DIST="https://dist.torproject.org/torbrowser"
 TB_FPR="EF6E286DDA85EA2A4BA7DE684E2C6E8793298290"   # Tor Browser Developers
@@ -111,10 +111,12 @@ EOF
 
 # ---------------------------------------------------------------------
 say "3/7  Debian $SUITE (arm64) Grundsystem installieren – dauert etwas"
+DBS_SCRIPT=""
+[ -e "/usr/share/debootstrap/scripts/$SUITE" ] || DBS_SCRIPT=/usr/share/debootstrap/scripts/sid
 debootstrap --arch=arm64 --variant=minbase --keyring="$KEYRING" \
   --components=main,non-free-firmware \
   --include=ca-certificates,apt-utils,util-linux,kmod,udev,dbus,systemd,systemd-sysv \
-  "$SUITE" "$ROOT" "$MIRROR"
+  "$SUITE" "$ROOT" "$MIRROR" $DBS_SCRIPT
 
 mkdir -p "$ROOT/boot/firmware"
 mount "${LOOP}p1" "$ROOT/boot/firmware"
@@ -599,6 +601,36 @@ cleanup; LOOP=""; trap - EXIT
 
 IMG_BYTES=$(stat -c%s "$OUT")
 IMG_SHA="$(sha256sum "$OUT" | cut -d' ' -f1)"
+
+make_initramfs() {  # $1 = Zielordner
+  command -v cpio >/dev/null || die "Programm fehlt: cpio"
+  for A in arm64 armhf; do
+    R="$WORK/initramfs-$A"; X="$WORK/bbx-$A"
+    rm -rf "$R" "$X"; mkdir -p "$R"/bin "$R"/dev "$R"/proc "$R"/sys "$R"/tmp "$R"/stick "$R"/sdboot "$R"/sdroot "$R"/lib/modules
+    dpkg-deb -x "$(ls "$WORK"/bb/busybox-static_*_"$A".deb)" "$X"
+    BB="$(find "$X" -type f -name busybox | head -1)"
+    [ -n "$BB" ] || die "BusyBox ($A) nicht gefunden"
+    install -m 755 "$BB" "$R/bin/busybox"
+    install -m 755 "$HERE/installer/init" "$R/init"
+    mknod -m 600 "$R/dev/console" c 5 1
+    mknod -m 666 "$R/dev/null" c 1 3
+    (cd "$R" && find . | cpio -o -H newc --quiet | gzip -9) > "$1/vela-installer-$A.gz"
+  done
+}
+
+# --- Bau direkt am Pi (vom Installer gestartet): unkomprimiert auf den Stick ---
+if [ -n "${LOCAL_INSTALL_DIR:-}" ]; then
+  say "Installer-Dateien auf den USB-Stick schreiben"
+  make_initramfs "$LOCAL_INSTALL_DIR"
+  [ "$(cd "$(dirname "$OUT")" && pwd)/$(basename "$OUT")" = "$LOCAL_INSTALL_DIR/vela-secure-pi3.img" ] || \
+    mv "$OUT" "$LOCAL_INSTALL_DIR/vela-secure-pi3.img"
+  echo "$IMG_SHA  vela-secure-pi3.img" > "$LOCAL_INSTALL_DIR/vela-secure-pi3.img.sha256"
+  echo "$IMG_BYTES" > "$LOCAL_INSTALL_DIR/vela-secure-pi3.img.size"
+  sync
+  say "Fertig gebaut."
+  exit 0
+fi
+
 xz -T0 -9 --check=crc32 -f "$OUT"
 sha256sum "$OUT.xz" > "$OUT.xz.sha256"
 SIZE_MB=$(( $(stat -c%s "$OUT.xz") / 1024 / 1024 ))
@@ -609,28 +641,16 @@ fi
 
 # ---------------------------------------------------------------------
 say "USB-Installer zusammenstellen"
-command -v cpio >/dev/null || die "Programm fehlt: cpio"
 INST="$WORK/installer-payload"
 rm -rf "$INST"; mkdir -p "$INST"
-for A in arm64 armhf; do
-  R="$WORK/initramfs-$A"; X="$WORK/bbx-$A"
-  rm -rf "$R" "$X"; mkdir -p "$R"/bin "$R"/dev "$R"/proc "$R"/sys "$R"/tmp "$R"/stick "$R"/sdboot "$R"/sdroot "$R"/lib/modules
-  dpkg-deb -x "$(ls "$WORK"/bb/busybox-static_*_"$A".deb)" "$X"
-  BB="$(find "$X" -type f -name busybox | head -1)"
-  [ -n "$BB" ] || die "BusyBox ($A) nicht gefunden"
-  install -m 755 "$BB" "$R/bin/busybox"
-  install -m 755 "$HERE/installer/init" "$R/init"
-  mknod -m 600 "$R/dev/console" c 5 1
-  mknod -m 666 "$R/dev/null" c 1 3
-  (cd "$R" && find . | cpio -o -H newc --quiet | gzip -9) > "$INST/vela-installer-$A.gz"
-done
+make_initramfs "$INST"
 ln -f "$OUT.xz" "$INST/$OUT.xz" 2>/dev/null || cp "$OUT.xz" "$INST/$OUT.xz"
 (cd "$INST" && sha256sum "$OUT.xz") > "$INST/$OUT.xz.sha256"
 echo "$IMG_BYTES" > "$INST/$OUT.size"
 echo "$IMG_SHA  $OUT" > "$INST/$OUT.sha256"
 # Eine einzige Datei: Installer-Skript + angehängter Inhalt
 RUN="$HERE/vela-installer.run"
-{ cat "$HERE/installer/install-vela.sh"; echo "__VELA_PAYLOAD__"; tar -C "$INST" -cf - .; } > "$RUN"
+{ cat "$HERE/installer/install-vela.sh"; echo "__VELA_PAYLOAD_IMAGE__"; tar -C "$INST" -cf - .; } > "$RUN"
 chmod 755 "$RUN"
 say "Fertig: vela-installer.run  ($(( $(stat -c%s "$RUN") / 1024 / 1024 )) MB) – auf einen USB-Stick kopieren"
 say "Fertig! Zwei Wege:"
