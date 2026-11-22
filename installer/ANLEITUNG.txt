@@ -1,47 +1,44 @@
-VELA SECURE – USB-INSTALLER FÜR DEN RASPBERRY PI 3 (B und B+)
-==============================================================
+VELA SECURE – INSTALLER FÜR DEN RASPBERRY PI 3 (B und B+)
+=========================================================
 
-Damit ersetzt du Raspberry Pi OS auf deinem Pi durch Vela Secure.
-Du brauchst keinen PC zum Flashen der SD-Karte.
+Eine einzige Datei: vela-installer.run
+Sie macht alles automatisch: Vela bauen, auf die SD-Karte schreiben, prüfen und starten.
 
-ACHTUNG: Die SD-Karte wird komplett gelöscht. Sichere vorher alles,
+ACHTUNG: Die SD-Karte wird am Ende komplett gelöscht. Sichere vorher alles,
 was du von deinem Raspberry Pi OS behalten willst!
 
+DU BRAUCHST
+   - Raspberry Pi 3 mit Raspberry Pi OS (32- oder 64-Bit), am besten 64-Bit
+   - einen USB-Stick ab 4 GB, als FAT32 formatiert
+   - Internet am Pi (LAN-Kabel oder WLAN)
+   - mindestens 1 GB freien Platz auf der SD-Karte
 
-1. USB-STICK VORBEREITEN (am PC)
-   - Formatiere einen USB-Stick (ab 1 GB) als FAT32.
-   - Kopiere die Datei "vela-installer.run" auf den Stick (mind. 2 GB).
-
-2. AM RASPBERRY PI (Raspberry Pi OS läuft)
-   - Stecke den Stick ein. Er erscheint unter /media/<dein-name>/...
-   - Öffne das Terminal und tippe (Pfad anpassen):
+SO GEHT'S
+1. Kopiere vela-installer.run auf den USB-Stick.
+2. Stecke den Stick in den Pi. Öffne das Terminal und tippe:
 
        sudo bash /media/$USER/*/vela-installer.run
 
-   - Das Programm prüft alles und fragt dich am Ende.
-     Tippe VELA ein und bestätige den Neustart mit j.
+3. Der Installer baut Vela jetzt automatisch auf deinem Pi.
+   Das dauert etwa 1–2 Stunden. Einfach laufen lassen.
+   Raspberry Pi OS bleibt dabei noch unverändert.
+4. Danach tippst du VELA ein und bestätigst den Neustart mit j.
+5. Der Pi startet in den Installer, der nur im Arbeitsspeicher läuft.
+   In den ersten 15 Sekunden kannst du mit einer Taste abbrechen.
+   Dann wird Vela auf die SD-Karte geschrieben und geprüft (3–8 Minuten).
+6. Wenn "erfolgreich installiert" erscheint, ziehst du den Stick ab.
+   Der Pi startet Vela.
 
-3. INSTALLATION (automatisch, etwa 3–8 Minuten)
-   - Der Pi startet in den Vela-Installer. Er läuft nur im Arbeitsspeicher.
-   - Du hast 15 Sekunden Zeit, um mit einer beliebigen Taste abzubrechen.
-     Dann startet wieder dein normales Raspberry Pi OS.
-   - Danach wird Vela auf die SD-Karte geschrieben und geprüft.
-   - Wenn "erfolgreich installiert" erscheint, ziehst du den Stick ab.
-     Der Pi startet Vela.
+WLAN IN VELA (optional)
+   Ein LAN-Kabel geht immer. Für WLAN: Pi aus, SD-Karte in den PC,
+   auf dem Laufwerk "RASPIFIRM" die Datei vela-wlan.txt öffnen,
+   SSID= und PASSWORT= eintragen, speichern und zurück in den Pi.
 
-4. WLAN (optional)
-   - Vela startet auch ohne WLAN, ein LAN-Kabel geht immer.
-   - Für WLAN: Pi ausschalten, SD-Karte in den PC stecken, auf dem
-     Laufwerk "RASPIFIRM" die Datei vela-wlan.txt öffnen,
-     SSID= und PASSWORT= eintragen und speichern. Dann zurück in den Pi.
-
-
-DOCH NICHT INSTALLIEREN?
+DOCH NICHT?
    Vor dem Neustart:   sudo bash vela-installer.run --undo
    Im Installer:       in den ersten 15 Sekunden eine Taste drücken.
 
-ES HAT NICHT GEKLAPPT?
-   Wenn der Installer vor dem Schreiben abbricht, bleibt die SD-Karte
-   unverändert und Raspberry Pi OS startet wieder.
-   Wenn er beim Schreiben abbricht: Flashe vela-secure-pi3.img.xz
-   am PC mit dem "Raspberry Pi Imager" (Eigenes Image) auf die SD-Karte.
+PROBLEME?
+   Wenn der Bau scheitert, steht das Protokoll in /var/tmp/vela-build.log.
+   Starte den Installer einfach noch einmal. Wenn Vela schon fertig gebaut
+   wurde, wird es direkt verwendet und nicht neu gebaut.
