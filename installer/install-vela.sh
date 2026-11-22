@@ -128,7 +128,7 @@ if [ "$ARG" = "--worker" ]; then
       [ "$FREE_SD" -ge 1800000000 ] || wdie "Zu wenig Platz auf der SD-Karte – auch nach dem Aufräumen (mind. 1,8 GB frei nötig, also eine SD-Karte ab 8 GB)."
 
       st "Werkzeuge werden installiert ..."
-      PKGS="debootstrap debian-archive-keyring parted dosfstools e2fsprogs fdisk xz-utils curl gpg gpgv nftables cpio"
+      PKGS="debootstrap debian-archive-keyring parted dosfstools e2fsprogs fdisk xz-utils curl gpg gpgv nftables cpio zerofree"
       [ "$(uname -m)" = aarch64 ] || PKGS="$PKGS qemu-user-static binfmt-support"
       apt-get update -q || wdie "apt-get update fehlgeschlagen – ist der Pi mit dem Internet verbunden?"
       # shellcheck disable=SC2086

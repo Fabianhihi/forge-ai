@@ -589,6 +589,33 @@ in_root "nft -c -f /etc/nftables.conf" || say "     Warnung: Firewall-Regeln kon
 
 # ---------------------------------------------------------------------
 say "7/7  Aufräumen, verkleinern, komprimieren"
+# Kernel-Treiber entfernen, die ein Raspberry Pi nie braucht (PC-Grafik, Server-Netzwerk ...)
+for K in "$ROOT"/usr/lib/modules/*/kernel; do
+  [ -d "$K" ] || continue
+  for d in drivers/gpu/drm/amd drivers/gpu/drm/radeon drivers/gpu/drm/nouveau drivers/gpu/drm/i915 \
+           drivers/gpu/drm/xe drivers/gpu/drm/msm drivers/gpu/drm/tegra drivers/gpu/drm/mediatek \
+           drivers/gpu/drm/rockchip drivers/gpu/drm/sun4i drivers/gpu/drm/meson drivers/gpu/drm/imx \
+           drivers/gpu/drm/exynos drivers/gpu/drm/hisilicon drivers/gpu/drm/panfrost drivers/gpu/drm/lima \
+           drivers/gpu/drm/nova drivers/gpu/drm/qxl drivers/gpu/drm/vmwgfx drivers/gpu/drm/ast \
+           drivers/infiniband drivers/net/ethernet/mellanox drivers/net/ethernet/intel \
+           drivers/net/ethernet/chelsio drivers/net/ethernet/qlogic drivers/net/ethernet/cavium \
+           drivers/net/ethernet/marvell drivers/net/ethernet/amazon drivers/net/ethernet/huawei \
+           drivers/net/ethernet/netronome drivers/net/ethernet/emulex drivers/net/ethernet/sfc \
+           drivers/net/ethernet/pensando drivers/net/ethernet/hisilicon drivers/net/ethernet/freescale \
+           drivers/net/ethernet/mscc drivers/net/ethernet/ti drivers/net/ethernet/qualcomm \
+           drivers/net/ethernet/stmicro drivers/net/ethernet/amd drivers/net/ethernet/brocade \
+           drivers/net/ethernet/cisco drivers/net/ethernet/google drivers/net/ethernet/microsoft \
+           drivers/net/wireless/intel drivers/net/wireless/ath drivers/net/wireless/marvell \
+           drivers/net/wireless/ti drivers/net/wireless/quantenna drivers/scsi/qla2xxx drivers/scsi/lpfc \
+           drivers/scsi/mpt3sas drivers/scsi/megaraid drivers/scsi/bfa drivers/scsi/qedf drivers/scsi/qedi \
+           drivers/media/pci drivers/media/dvb-frontends drivers/staging sound/pci net/sunrpc fs/ocfs2 \
+           fs/gfs2 fs/xfs fs/btrfs fs/nfs fs/nfsd fs/ceph fs/smb fs/bcachefs; do
+    rm -rf "${K:?}/$d"
+  done
+done
+in_root "for v in \$(ls /usr/lib/modules); do depmod -a \$v; done"
+in_root "rm -rf /usr/share/doc/* /usr/share/man/* /usr/share/info/* /var/cache/debconf/*-old"
+echo "Größte Ordner (MB):"; du -x -m -d 3 "$ROOT/usr" 2>/dev/null | sort -n | tail -12
 rm -f "$ROOT/usr/sbin/policy-rc.d"
 in_root "apt-get clean"
 rm -rf "$ROOT"/var/lib/apt/lists/* "$ROOT"/var/cache/* "$ROOT"/var/log/*.log "$ROOT"/tmp/* "$ROOT"/root/.bash_history
@@ -603,12 +630,16 @@ cleanup; LOOP=""
 # --- Image auf die belegte Größe schrumpfen (wächst beim 1. Start wieder) ---
 say "     Image verkleinern"
 LOOP="$(losetup -fP --show "$OUT")"; sleep 1
-e2fsck -fy "${LOOP}p2" >/dev/null 2>&1 || true
-resize2fs -M "${LOOP}p2" >/dev/null 2>&1
+for _ in 1 2 3 4 5; do [ -b "${LOOP}p2" ] && break; sleep 1; done
+[ -b "${LOOP}p2" ] || die "Partition ${LOOP}p2 nicht gefunden"
+e2fsck -fy "${LOOP}p2" || true
+resize2fs -M "${LOOP}p2" || die "Verkleinern fehlgeschlagen"
 BS=$(dumpe2fs -h "${LOOP}p2" 2>/dev/null | awk -F: '/^Block size/ {gsub(/ /,"",$2); print $2}')
 BC=$(dumpe2fs -h "${LOOP}p2" 2>/dev/null | awk -F: '/^Block count/ {gsub(/ /,"",$2); print $2}')
 BC=$(( BC + 64*1024*1024 / BS ))          # 64 MB Reserve für den ersten Start
-resize2fs "${LOOP}p2" "$BC" >/dev/null 2>&1
+resize2fs "${LOOP}p2" "$BC"
+# freien Speicher mit Nullen füllen -> lässt sich fast vollständig komprimieren
+if command -v zerofree >/dev/null; then zerofree "${LOOP}p2" || true; fi
 losetup -d "$LOOP"; LOOP=""
 P2_START=$(( 260 * 1024 * 1024 / 512 ))
 P2_SECT=$(( BC * BS / 512 + 2048 ))
@@ -652,7 +683,7 @@ if [ -n "${LOCAL_INSTALL_DIR:-}" ]; then
   exit 0
 fi
 
-xz -T0 -9 --check=crc32 -f "$OUT"
+xz -T0 -9e --check=crc32 -f "$OUT"
 sha256sum "$OUT.xz" > "$OUT.xz.sha256"
 SIZE_MB=$(( $(stat -c%s "$OUT.xz") / 1024 / 1024 ))
 say "Fertig: $OUT.xz  ($SIZE_MB MB)"

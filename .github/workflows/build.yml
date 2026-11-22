@@ -22,7 +22,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y debootstrap debian-archive-keyring parted \
-            dosfstools e2fsprogs fdisk xz-utils curl gpg gpgv nftables cpio
+            dosfstools e2fsprogs fdisk xz-utils curl gpg gpgv nftables cpio zerofree
 
       - name: Vela bauen (Image + Offline-Installer)
         run: sudo ./build.sh
