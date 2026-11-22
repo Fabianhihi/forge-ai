@@ -1,19 +1,20 @@
-name: Vela Secure bauen
+name: Vela Secure – Offline-Installer bauen
 
+# Läuft nur auf dem Zweig "vela-build" – FORGE AI wird nicht berührt.
+# Es wird KEIN Release erstellt (FORGE AI nutzt Releases für seine Updates);
+# das Ergebnis ist ein Download ("Artifact") am Bau-Lauf.
 on:
-  workflow_dispatch: {}
   push:
-    branches: [main]
-    paths: ['build.sh', 'installer/**', '.github/workflows/**']
+    branches: [vela-build]
+  workflow_dispatch: {}
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   build:
-    # Normaler GitHub-Rechner (geht auch bei privaten Repos); ARM wird per qemu emuliert
-    runs-on: ubuntu-24.04
-    timeout-minutes: 240
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 180
     steps:
       - uses: actions/checkout@v4
 
@@ -21,21 +22,18 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y debootstrap debian-archive-keyring parted \
-            dosfstools e2fsprogs xz-utils curl gpg gpgv nftables cpio \
-            qemu-user-static binfmt-support
-          ls /proc/sys/fs/binfmt_misc/ | grep -i aarch64
+            dosfstools e2fsprogs fdisk xz-utils curl gpg gpgv nftables cpio
 
-      - name: Vela bauen (Image + Installer)
+      - name: Vela bauen (Image + Offline-Installer)
         run: sudo ./build.sh
 
-      - name: Release veröffentlichen
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          TAG="v$(date -u +%Y.%m.%d-%H%M)"
-          sudo chown "$(id -u)" vela-installer.run vela-secure-pi3.img.xz vela-secure-pi3.img.xz.sha256 "Vela installieren.desktop"
-          gh release create "$TAG" \
-            --title "Vela Secure $TAG" \
-            --notes "**Offline-Installer:** vela-installer.run und \"Vela installieren.desktop\" auf einen USB-Stick (FAT32, ab 2 GB) kopieren, am Pi doppelt auf \"Vela installieren\" klicken – kein Internet nötig.
-          **vela-secure-pi3.img.xz** – alternativ mit dem Raspberry Pi Imager flashen." \
-            vela-installer.run "Vela installieren.desktop" vela-secure-pi3.img.xz vela-secure-pi3.img.xz.sha256
+      - name: Offline-Installer bereitstellen
+        uses: actions/upload-artifact@v4
+        with:
+          name: vela-offline-installer
+          path: |
+            vela-installer.run
+            Vela installieren.desktop
+            installer/ANLEITUNG.txt
+          compression-level: 0
+          retention-days: 90
